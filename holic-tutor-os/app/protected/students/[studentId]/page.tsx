@@ -1,8 +1,7 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import {
   ArrowLeft,
-  BookOpenCheck,
   MessageSquareText,
   NotebookTabs,
   Plus,
@@ -13,11 +12,8 @@ import {
   UserRound,
 } from "lucide-react";
 
-import {
-  createLessonRecord,
-  deleteStudent,
-  updateStudent,
-} from "@/app/protected/actions";
+import { deleteStudent, updateStudent } from "@/app/protected/actions";
+import { LessonRecordForm } from "@/components/lesson-record-form";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -448,88 +444,7 @@ export default async function StudentDetailPage({
         </div>
       </section>
 
-      <Card className="rounded-lg" id="new-lesson">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-xl">
-            <BookOpenCheck className="size-5 text-emerald-700 dark:text-emerald-300" />
-            새 수업 기록 추가
-          </CardTitle>
-          <CardDescription>
-            약점 태그는 쉼표로 구분합니다. 예: 인수분해, 계산 실수
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form
-            action={createLessonRecord.bind(null, student.id)}
-            className="grid gap-5"
-          >
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="grid gap-2">
-                <Label htmlFor="lesson_date">수업일</Label>
-                <Input
-                  id="lesson_date"
-                  name="lesson_date"
-                  type="date"
-                  defaultValue={todayInSeoul()}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="duration_minutes">수업 시간</Label>
-                <Input
-                  id="duration_minutes"
-                  name="duration_minutes"
-                  min="1"
-                  placeholder="분 단위"
-                  type="number"
-                />
-              </div>
-              <div className="grid gap-2 md:col-span-2">
-                <Label htmlFor="topic">수업 주제</Label>
-                <Input
-                  id="topic"
-                  name="topic"
-                  required
-                  placeholder="예: 이차방정식 활용"
-                />
-              </div>
-              <div className="grid gap-2 md:col-span-2">
-                <Label htmlFor="content">수업 내용</Label>
-                <Textarea id="content" name="content" />
-              </div>
-              <div className="grid gap-2 md:col-span-2">
-                <Label htmlFor="performance">오늘 관찰</Label>
-                <Textarea
-                  id="performance"
-                  name="performance"
-                  placeholder="예: 식 세우기는 좋아졌지만 부호 실수가 반복됨"
-                />
-              </div>
-              <div className="grid gap-2 md:col-span-2">
-                <Label htmlFor="weakness_tags">약점 태그</Label>
-                <Input
-                  id="weakness_tags"
-                  name="weakness_tags"
-                  placeholder="예: 부호 실수, 함수 그래프, 문제 해석"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="homework">과제</Label>
-                <Textarea id="homework" name="homework" />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="next_plan">다음 계획</Label>
-                <Textarea id="next_plan" name="next_plan" />
-              </div>
-            </div>
-            <div>
-              <Button type="submit">
-                <BookOpenCheck />
-                기록 저장
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+      <LessonRecordForm defaultDate={todayInSeoul()} studentId={student.id} />
 
       <Card className="rounded-lg" id="edit-student">
         <CardHeader>

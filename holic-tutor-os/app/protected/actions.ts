@@ -26,7 +26,7 @@ function positiveInteger(formData: FormData, key: string) {
 
 function weaknessTags(formData: FormData) {
   return text(formData, "weakness_tags")
-    .split(",")
+    .split(/[,\n]/)
     .map((tag) => tag.trim())
     .filter(Boolean);
 }
@@ -56,22 +56,29 @@ async function requireUser() {
 
 function parentFeedbackDraft(input: {
   topic: string;
-  performance: string | null;
+  content: string | null;
+  strengths: string | null;
+  parentNote: string | null;
   homework: string | null;
   nextPlan: string | null;
   weaknessTags: string[];
 }) {
-  const lines = [
-    `안녕하세요. 오늘은 ${input.topic} 수업을 진행했습니다.`,
-    input.performance
-      ? `수업 중 관찰한 점은 ${input.performance}입니다.`
-      : "수업 태도와 풀이 과정을 중심으로 확인했습니다.",
-  ];
+  const lines = [`안녕하세요. 오늘은 ${input.topic} 단원을 중심으로 수업했습니다.`];
+
+  if (input.content) {
+    lines.push(`오늘 다룬 내용은 ${input.content}입니다.`);
+  }
+
+  if (input.strengths) {
+    lines.push(`좋았던 점은 ${input.strengths}입니다.`);
+  }
 
   if (input.weaknessTags.length > 0) {
-    lines.push(
-      `반복해서 점검할 부분은 ${input.weaknessTags.join(", ")}입니다.`,
-    );
+    lines.push(`반복해서 점검할 부분은 ${input.weaknessTags.join(", ")}입니다.`);
+  }
+
+  if (input.parentNote) {
+    lines.push(input.parentNote);
   }
 
   if (input.homework) {
@@ -79,7 +86,7 @@ function parentFeedbackDraft(input: {
   }
 
   if (input.nextPlan) {
-    lines.push(`다음 수업에서는 ${input.nextPlan}을 이어서 보겠습니다.`);
+    lines.push(`다음 수업에서는 ${input.nextPlan}을 우선 확인하겠습니다.`);
   }
 
   return lines.join("\n");
@@ -166,22 +173,30 @@ export async function deleteStudent(studentId: string) {
   redirect("/protected/students");
 }
 
-export async function createLessonRecord(
-  studentId: string,
-  formData: FormData,
-) {
+export async function createLessonRecord(studentId: string, formData: FormData) {
   const { supabase, user } = await requireUser();
+
   const topic = text(formData, "topic");
   const lessonDate = text(formData, "lesson_date");
+  const coveredContent = nullableText(formData, "content");
+  const strengths = nullableText(formData, "strengths") ?? nullableText(formData, "performance");
+  const parentNote = nullableText(formData, "parent_note");
+  const internalMemo = nullableText(formData, "internal_memo");
+  const homework = nullableText(formData, "homework");
+  const nextPlan = nullableText(formData, "next_plan");
 
   if (!topic) {
     throw new Error("수업 주제는 필수입니다.");
   }
 
   const tags = weaknessTags(formData);
-  const performance = nullableText(formData, "performance");
-  const homework = nullableText(formData, "homework");
-  const nextPlan = nullableText(formData, "next_plan");
+  const storedContent =
+    [
+      coveredContent ? `오늘 다룬 내용\n${coveredContent}` : null,
+      internalMemo ? `[선생님 내부 메모]\n${internalMemo}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n\n") || null;
 
   const { error } = await supabase.from("lesson_records").insert({
     user_id: user.id,
@@ -189,14 +204,16 @@ export async function createLessonRecord(
     lesson_date: lessonDate || new Date().toISOString().slice(0, 10),
     duration_minutes: positiveInteger(formData, "duration_minutes"),
     topic,
-    content: nullableText(formData, "content"),
-    performance,
+    content: storedContent,
+    performance: strengths,
     homework,
     next_plan: nextPlan,
     weakness_tags: tags,
     parent_feedback_draft: parentFeedbackDraft({
       topic,
-      performance,
+      content: coveredContent,
+      strengths,
+      parentNote,
       homework,
       nextPlan,
       weaknessTags: tags,
@@ -210,4 +227,5 @@ export async function createLessonRecord(
   revalidatePath("/protected");
   revalidatePath("/protected/students");
   revalidatePath(`/protected/students/${studentId}`);
+  redirect(`/protected/students/${studentId}`);
 }
