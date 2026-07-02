@@ -41,3 +41,10 @@ dev-server*.log
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+# crop benchmark local files
+/.venv-crop/
+/crop_inputs/
+/crop_outputs/
+/crop_outputs_v2/
+/crop_outputs_v3/
+/crop_outputs_v4/
