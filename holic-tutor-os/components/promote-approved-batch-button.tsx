@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -9,8 +9,10 @@ import { Button } from "@/components/ui/button";
 
 export function PromoteApprovedBatchButton({
   batchId,
+  label = "자동 승인 후보 정식 DB로 보내기",
 }: {
   batchId: string;
+  label?: string;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -22,6 +24,7 @@ export function PromoteApprovedBatchButton({
       const result = await promoteApprovedBatchCandidates(batchId);
       const params = new URLSearchParams({
         batch: batchId,
+        filter: "promoted",
         notice: result.message,
         noticeType: result.status === "error" ? "error" : "success",
       });
@@ -40,7 +43,7 @@ export function PromoteApprovedBatchButton({
     <div className="grid gap-2">
       <Button disabled={isPending} onClick={handlePromote} type="button">
         <Send />
-        {isPending ? "등록 중..." : "승인 후보 정식 DB로 보내기"}
+        {isPending ? "등록 중..." : label}
       </Button>
       {message ? (
         <p className="text-sm text-destructive" role="alert">

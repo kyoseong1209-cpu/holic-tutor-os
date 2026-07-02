@@ -1,4 +1,4 @@
-"use server";
+﻿"use server";
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -8,6 +8,7 @@ import {
   PROBLEM_CANDIDATE_BUCKET,
   isReviewGrade,
   isReviewStatus,
+  statusForFinalGrade,
   type ReviewGrade,
   type ReviewStatus,
 } from "@/lib/tutor-os/problem-candidates";
@@ -36,10 +37,11 @@ function nullableFormString(formData: FormData, key: string) {
   return value.length > 0 ? value : null;
 }
 
-function gradeFromForm(formData: FormData): ReviewGrade | null | undefined {
-  if (!formData.has("review_grade")) return undefined;
+function manualGradeFromForm(formData: FormData): ReviewGrade | null | undefined {
+  const key = formData.has("manual_review_grade") ? "manual_review_grade" : "review_grade";
+  if (!formData.has(key)) return undefined;
 
-  const value = formString(formData, "review_grade");
+  const value = formString(formData, key);
   if (!value) return null;
   if (isReviewGrade(value)) return value;
 
@@ -55,29 +57,84 @@ function statusFromForm(formData: FormData): ReviewStatus | undefined {
   throw new Error("검수 상태값이 올바르지 않습니다.");
 }
 
+type ReviewStateRow = {
+  auto_review_grade: ReviewGrade | null;
+  manual_review_grade: ReviewGrade | null;
+  final_review_grade: ReviewGrade | null;
+  review_grade: ReviewGrade | null;
+};
+
+function effectiveGrade(candidate: ReviewStateRow, nextManualGrade?: ReviewGrade | null) {
+  if (nextManualGrade !== undefined) {
+    return nextManualGrade ?? candidate.auto_review_grade ?? null;
+  }
+
+  return (
+    candidate.final_review_grade ??
+    candidate.manual_review_grade ??
+    candidate.review_grade ??
+    candidate.auto_review_grade ??
+    null
+  );
+}
+
 export async function updateProblemCandidateReview(
   candidateId: string,
   formData: FormData,
 ) {
   const { supabase, user } = await requireUser();
-  const reviewGrade = gradeFromForm(formData);
+  const manualGrade = manualGradeFromForm(formData);
   const reviewStatus = statusFromForm(formData);
 
+  const { data: currentData, error: currentError } = await supabase
+    .from("problem_candidates")
+    .select("auto_review_grade,manual_review_grade,final_review_grade,review_grade")
+    .eq("id", candidateId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (currentError || !currentData) {
+    throw new Error(currentError?.message ?? "후보를 찾지 못했습니다.");
+  }
+
+  const current = currentData as ReviewStateRow;
+  const nextFinalGrade = effectiveGrade(current, manualGrade);
+  const now = new Date().toISOString();
   const updates: Record<string, string | null> = {};
-  if (reviewGrade !== undefined) {
-    updates.review_grade = reviewGrade;
+  const hasManualReviewInput =
+    manualGrade !== undefined ||
+    reviewStatus !== undefined ||
+    formData.has("review_memo") ||
+    formData.has("rejected_reason");
+
+  if (manualGrade !== undefined) {
+    updates.manual_review_grade = manualGrade;
+    updates.review_grade = manualGrade;
+    updates.final_review_grade = nextFinalGrade;
   }
+
   if (reviewStatus !== undefined) {
-    const now = new Date().toISOString();
     updates.review_status = reviewStatus;
-    updates.reviewed_at = now;
-    updates.approved_at = reviewStatus === "approved" ? now : null;
+  } else if (manualGrade !== undefined) {
+    updates.review_status = statusForFinalGrade(nextFinalGrade);
   }
+
+  if (updates.review_status !== undefined) {
+    updates.approved_at = updates.review_status === "approved" ? now : null;
+  }
+
   if (formData.has("review_memo")) {
     updates.review_memo = nullableFormString(formData, "review_memo");
   }
   if (formData.has("rejected_reason")) {
     updates.rejected_reason = nullableFormString(formData, "rejected_reason");
+  }
+
+  if (hasManualReviewInput) {
+    updates.reviewed_by = user.id;
+    updates.reviewed_at = now;
+    updates.review_source = "manual";
+    updates.review_version = "manual_override_v1";
   }
 
   if (Object.keys(updates).length === 0) {
@@ -280,8 +337,11 @@ type PromotionCandidateRow = {
   source_pdf_name: string | null;
   crop_version: string;
   bbox: unknown;
-  review_status: string;
+  review_status: ReviewStatus;
   review_grade: ReviewGrade | null;
+  auto_review_grade: ReviewGrade | null;
+  manual_review_grade: ReviewGrade | null;
+  final_review_grade: ReviewGrade | null;
   promoted_at: string | null;
   promoted_problem_id: string | null;
 };
@@ -310,6 +370,24 @@ function emptyPromotionResult(message: string, status: "success" | "error" = "su
   };
 }
 
+function candidateFinalGrade(candidate: PromotionCandidateRow) {
+  return (
+    candidate.final_review_grade ??
+    candidate.manual_review_grade ??
+    candidate.review_grade ??
+    candidate.auto_review_grade ??
+    null
+  );
+}
+
+function candidateCanPromote(candidate: PromotionCandidateRow) {
+  if (candidate.review_status === "needs_edit" || candidate.review_status === "rejected") {
+    return false;
+  }
+
+  return candidate.review_status === "approved" || candidateFinalGrade(candidate) === "A";
+}
+
 async function promoteCandidateRows(
   rows: PromotionCandidateRow[],
   batch: PromotionBatchRow,
@@ -321,7 +399,7 @@ async function promoteCandidateRows(
   const failures: string[] = [];
 
   for (const candidate of rows) {
-    if (candidate.review_status !== "approved") {
+    if (!candidateCanPromote(candidate)) {
       skippedCount += 1;
       continue;
     }
@@ -331,6 +409,7 @@ async function promoteCandidateRows(
       continue;
     }
 
+    const finalGrade = candidateFinalGrade(candidate);
     const { data: existingProblem, error: existingProblemError } = await supabase
       .from("problems")
       .select("id")
@@ -372,7 +451,7 @@ async function promoteCandidateRows(
         image_storage_path: candidate.image_path,
         bbox: candidate.bbox,
         crop_version: candidate.crop_version ?? batch.crop_version,
-        review_grade: candidate.review_grade,
+        review_grade: finalGrade,
       })
       .select("id")
       .single();
@@ -441,16 +520,15 @@ export async function promoteApprovedBatchCandidates(
     .select("*")
     .eq("batch_id", batchId)
     .eq("user_id", user.id)
-    .eq("review_status", "approved")
     .order("question_number_guess", { ascending: true, nullsFirst: false });
 
   if (candidatesError) {
-    return emptyPromotionResult(`승인 후보 조회 실패: ${errorMessage(candidatesError)}`, "error");
+    return emptyPromotionResult(`승격 후보 조회 실패: ${errorMessage(candidatesError)}`, "error");
   }
 
-  const rows = (candidatesData ?? []) as PromotionCandidateRow[];
+  const rows = ((candidatesData ?? []) as PromotionCandidateRow[]).filter(candidateCanPromote);
   if (rows.length === 0) {
-    return emptyPromotionResult("승인 상태인 후보가 없습니다.");
+    return emptyPromotionResult("정식 DB로 보낼 자동 승인 또는 최종 A 후보가 없습니다.");
   }
 
   return promoteCandidateRows(rows, batchData as PromotionBatchRow);
@@ -473,8 +551,8 @@ export async function promoteProblemCandidate(
   }
 
   const candidate = candidateData as PromotionCandidateRow;
-  if (candidate.review_status !== "approved") {
-    return emptyPromotionResult("approved 상태인 후보만 정식 문항으로 등록할 수 있습니다.", "error");
+  if (!candidateCanPromote(candidate)) {
+    return emptyPromotionResult("최종 A 또는 approved 상태인 후보만 정식 문항으로 등록할 수 있습니다.", "error");
   }
 
   const { data: batchData, error: batchError } = await supabase
@@ -490,4 +568,3 @@ export async function promoteProblemCandidate(
 
   return promoteCandidateRows([candidate], batchData as PromotionBatchRow);
 }
-

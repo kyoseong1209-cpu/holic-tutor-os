@@ -1,7 +1,15 @@
-import type {
+﻿import type {
   ProblemCandidateBBox,
   ReviewGrade,
 } from "@/lib/tutor-os/problem-candidates";
+
+export const PROBLEM_DIFFICULTIES = ["하", "중", "중상", "상", "최상", "킬러"] as const;
+
+export type ProblemDifficulty = (typeof PROBLEM_DIFFICULTIES)[number];
+
+export function isProblemDifficulty(value: string): value is ProblemDifficulty {
+  return (PROBLEM_DIFFICULTIES as readonly string[]).includes(value);
+}
 
 export type Problem = {
   id: string;

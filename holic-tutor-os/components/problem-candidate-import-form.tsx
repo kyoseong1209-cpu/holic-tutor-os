@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -17,6 +17,8 @@ import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
 import {
   PROBLEM_CANDIDATE_BUCKET,
+  autoReviewCropCandidate,
+  buildCropPageBounds,
   type CropCoordinatesCandidate,
   type CropCoordinatesFile,
   type ProblemCandidateBBox,
@@ -149,6 +151,22 @@ function throwStepError(step: string, error: unknown): never {
   throw new Error(formatStepError(step, error));
 }
 
+function autoReviewNotice(input: {
+  approved: number;
+  needsEdit: number;
+  rejected: number;
+  missing: number;
+  duplicate: number;
+}) {
+  return [
+    `자동 승인 ${input.approved}개`,
+    `검수 필요 ${input.needsEdit}개`,
+    `반려 의심 ${input.rejected}개`,
+    `누락 의심 ${input.missing}개`,
+    `중복 의심 ${input.duplicate}개`,
+  ].join(" · ");
+}
+
 export function ProblemCandidateImportForm() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -247,7 +265,15 @@ export function ProblemCandidateImportForm() {
         throwStepError(`[2/5 storage.objects upload crop_coordinates.json path=${coordinatesPath}]`, coordinatesUploadError);
       }
 
+      const pageBounds = buildCropPageBounds(coordinates.candidates);
+      const autoCounts = {
+        approved: 0,
+        needsEdit: 0,
+        rejected: 0,
+      };
       const candidateRows = [];
+      const reviewedAt = new Date().toISOString();
+
       for (const candidate of coordinates.candidates) {
         const imageFile = imagesByStem.get(candidate.candidate_id);
         if (!imageFile) continue;
@@ -267,6 +293,17 @@ export function ProblemCandidateImportForm() {
           );
         }
 
+        const autoReview = autoReviewCropCandidate(candidate, {
+          duplicateQuestionNumbers: coordinates.duplicate_question_numbers ?? [],
+          missingQuestionNumbers: coordinates.missing_question_numbers_guess ?? [],
+          pageBounds,
+          hasImage: true,
+        });
+
+        if (autoReview.grade === "A") autoCounts.approved += 1;
+        if (autoReview.grade === "B") autoCounts.needsEdit += 1;
+        if (autoReview.grade === "C") autoCounts.rejected += 1;
+
         candidateRows.push({
           batch_id: batch.id,
           candidate_id: candidate.candidate_id,
@@ -278,7 +315,16 @@ export function ProblemCandidateImportForm() {
           bbox: candidate.bbox,
           confidence: candidate.confidence,
           notes: candidate.notes,
-          review_status: "pending",
+          review_status: autoReview.status,
+          auto_review_grade: autoReview.grade,
+          auto_review_score: autoReview.score,
+          auto_review_reason: autoReview.reason,
+          manual_review_grade: null,
+          final_review_grade: autoReview.grade,
+          review_source: autoReview.source,
+          review_version: autoReview.version,
+          reviewed_at: reviewedAt,
+          approved_at: autoReview.status === "approved" ? reviewedAt : null,
         });
       }
 
@@ -300,8 +346,20 @@ export function ProblemCandidateImportForm() {
         throwStepError("[5/5 crop_import_batches update coordinates_path]", batchUpdateError);
       }
 
-      setMessage({ type: "success", text: "문항 후보를 가져왔습니다." });
-      router.push(`/protected/problem-candidates?batch=${batch.id}`);
+      const notice = autoReviewNotice({
+        ...autoCounts,
+        missing: coordinates.missing_question_numbers_guess?.length ?? 0,
+        duplicate: coordinates.duplicate_question_numbers?.length ?? 0,
+      });
+
+      setMessage({ type: "success", text: `문항 후보를 가져왔습니다. ${notice}` });
+      const params = new URLSearchParams({
+        batch: batch.id,
+        filter: "needs_review",
+        notice,
+        noticeType: "success",
+      });
+      router.push(`/protected/problem-candidates?${params.toString()}`);
       router.refresh();
     } catch (error) {
       setMessage({
@@ -318,7 +376,7 @@ export function ProblemCandidateImportForm() {
       <CardHeader>
         <CardTitle>crop 결과 가져오기</CardTitle>
         <CardDescription>
-          브라우저 파일 선택으로 crop_coordinates.json과 q_001.png 형식의 이미지를 업로드합니다.
+          업로드 즉시 규칙 기반 자동 검수를 실행하고, 사람은 검수 필요 후보부터 확인합니다.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -399,7 +457,7 @@ export function ProblemCandidateImportForm() {
           <div>
             <Button disabled={isUploading} type="submit">
               <UploadCloud />
-              {isUploading ? "업로드 중..." : "업로드"}
+              {isUploading ? "업로드 중..." : "업로드 및 자동 검수"}
             </Button>
           </div>
         </form>

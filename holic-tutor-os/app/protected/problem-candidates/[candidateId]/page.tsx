@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, FileSearch, Save } from "lucide-react";
 
@@ -20,10 +20,14 @@ import {
   PROBLEM_CANDIDATE_BUCKET,
   REVIEW_GRADES,
   REVIEW_STATUSES,
+  canPromoteCandidate,
+  effectiveReviewGrade,
   reviewGradeLabel,
+  reviewSourceLabel,
   reviewStatusLabel,
   type CropImportBatch,
   type ProblemCandidate,
+  type ReviewGrade,
   type ReviewStatus,
 } from "@/lib/tutor-os/problem-candidates";
 
@@ -36,6 +40,24 @@ function statusBadgeClass(status: ReviewStatus) {
   if (status === "needs_edit") return "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200";
   if (status === "rejected") return "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200";
   return "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200";
+}
+
+function gradeBadgeClass(grade: ReviewGrade | null | undefined) {
+  if (grade === "A") return "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200";
+  if (grade === "B") return "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-200";
+  if (grade === "C") return "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200";
+  return "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200";
+}
+
+function GradeBadge({ label, grade }: { label: string; grade: ReviewGrade | null | undefined }) {
+  return (
+    <div className="rounded-md border p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <Badge className={gradeBadgeClass(grade)} variant="outline">
+        {reviewGradeLabel(grade)}
+      </Badge>
+    </div>
+  );
 }
 
 export default async function ProblemCandidateDetailPage({ params }: PageProps) {
@@ -75,6 +97,8 @@ export default async function ProblemCandidateDetailPage({ params }: PageProps) 
   ]);
   const batch = batchData as CropImportBatch | null;
   const action = updateProblemCandidateReview.bind(null, candidate.id);
+  const manualGrade = candidate.manual_review_grade ?? candidate.review_grade;
+  const finalGrade = effectiveReviewGrade(candidate);
 
   return (
     <div className="flex w-full flex-col gap-6">
@@ -92,7 +116,7 @@ export default async function ProblemCandidateDetailPage({ params }: PageProps) 
           </p>
         </div>
         <Button asChild variant="outline">
-          <Link href={`/protected/problem-candidates?batch=${candidate.batch_id}`}>
+          <Link href={`/protected/problem-candidates?batch=${candidate.batch_id}&filter=needs_review`}>
             <ArrowLeft />
             목록으로
           </Link>
@@ -143,15 +167,47 @@ export default async function ProblemCandidateDetailPage({ params }: PageProps) 
         <div className="grid gap-4">
           <Card className="rounded-lg">
             <CardHeader>
-              <CardTitle>검수 저장</CardTitle>
+              <CardTitle>자동 검수 결과</CardTitle>
               <CardDescription>
-                A/B/C 평가와 승인 상태, 검수 메모를 저장합니다.
+                규칙 기반 1차 검수 결과입니다. 수동 판정이 있으면 최종 판정에 우선 적용됩니다.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              <div className="grid grid-cols-3 gap-2 text-sm">
+                <GradeBadge grade={candidate.auto_review_grade} label="자동" />
+                <GradeBadge grade={manualGrade} label="수동" />
+                <GradeBadge grade={finalGrade} label="최종" />
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">auto score</p>
+                  <p className="font-medium">{candidate.auto_review_score ?? "-"}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">source</p>
+                  <p className="font-medium">{reviewSourceLabel(candidate.review_source)}</p>
+                </div>
+              </div>
+              <div>
+                <p className="mb-2 text-sm font-medium">자동 검수 사유</p>
+                <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
+                  {candidate.auto_review_reason ?? "자동 검수 사유 없음"}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg">
+            <CardHeader>
+              <CardTitle>수동 판정 저장</CardTitle>
+              <CardDescription>
+                자동 판정이 애매한 후보만 수동으로 A/B/C와 상태를 덮어씁니다.
               </CardDescription>
             </CardHeader>
             <CardContent>
               <form action={action} className="grid gap-5">
                 <div className="grid gap-2">
-                  <Label>A/B/C 평가</Label>
+                  <Label>수동 판정</Label>
                   <div className="flex flex-wrap gap-2">
                     {REVIEW_GRADES.map((grade) => (
                       <label
@@ -159,8 +215,8 @@ export default async function ProblemCandidateDetailPage({ params }: PageProps) 
                         key={grade}
                       >
                         <input
-                          defaultChecked={candidate.review_grade === grade}
-                          name="review_grade"
+                          defaultChecked={manualGrade === grade}
+                          name="manual_review_grade"
                           type="radio"
                           value={grade}
                         />
@@ -169,12 +225,12 @@ export default async function ProblemCandidateDetailPage({ params }: PageProps) 
                     ))}
                     <label className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm">
                       <input
-                        defaultChecked={candidate.review_grade === null}
-                        name="review_grade"
+                        defaultChecked={manualGrade === null}
+                        name="manual_review_grade"
                         type="radio"
                         value=""
                       />
-                      미평가
+                      수동 판정 없음
                     </label>
                   </div>
                 </div>
@@ -227,13 +283,13 @@ export default async function ProblemCandidateDetailPage({ params }: PageProps) 
             <CardHeader>
               <CardTitle>정식 문항 등록</CardTitle>
               <CardDescription>
-                approved 상태인 후보만 정식 문항 DB로 등록할 수 있습니다.
+                최종 A 또는 approved 상태이면서 검수 필요/반려가 아닌 후보만 등록합니다.
               </CardDescription>
             </CardHeader>
             <CardContent>
               <PromoteProblemCandidateButton
                 candidateId={candidate.id}
-                disabled={candidate.review_status !== "approved" || Boolean(candidate.promoted_problem_id)}
+                disabled={!canPromoteCandidate(candidate) || Boolean(candidate.promoted_problem_id)}
               />
             </CardContent>
           </Card>
@@ -242,7 +298,7 @@ export default async function ProblemCandidateDetailPage({ params }: PageProps) 
             <CardHeader>
               <CardTitle>후보 정보</CardTitle>
               <CardDescription>
-                현재 평가는 {reviewGradeLabel(candidate.review_grade)}입니다.
+                confidence {candidate.confidence ?? "-"} · {candidate.review_version ?? "version 없음"}
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">

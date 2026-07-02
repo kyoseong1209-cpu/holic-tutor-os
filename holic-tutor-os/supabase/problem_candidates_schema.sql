@@ -1,4 +1,4 @@
--- Holic Tutor OS problem candidate review schema
+﻿-- Holic Tutor OS problem candidate review schema
 -- Run this in Supabase Dashboard > SQL Editor.
 -- The app uses user_id consistently. If an older owner_id column exists, this
 -- migration renames it to user_id and makes user_id default to auth.uid().
@@ -88,8 +88,26 @@ create table if not exists public.problem_candidates (
   review_grade text
     constraint problem_candidates_review_grade_check
     check (review_grade is null or review_grade in ('A', 'B', 'C')),
+  auto_review_grade text
+    constraint problem_candidates_auto_review_grade_check
+    check (auto_review_grade is null or auto_review_grade in ('A', 'B', 'C')),
+  auto_review_score numeric
+    constraint problem_candidates_auto_review_score_check
+    check (auto_review_score is null or (auto_review_score >= 0 and auto_review_score <= 1)),
+  auto_review_reason text,
+  manual_review_grade text
+    constraint problem_candidates_manual_review_grade_check
+    check (manual_review_grade is null or manual_review_grade in ('A', 'B', 'C')),
+  final_review_grade text
+    constraint problem_candidates_final_review_grade_check
+    check (final_review_grade is null or final_review_grade in ('A', 'B', 'C')),
+  review_source text default 'rule_based'
+    constraint problem_candidates_review_source_check
+    check (review_source is null or review_source in ('rule_based', 'local_vlm', 'openai', 'manual')),
+  review_version text default 'rule_based_crop_v1',
   review_memo text,
   rejected_reason text,
+  reviewed_by uuid references auth.users(id) on delete set null,
   reviewed_at timestamptz,
   approved_at timestamptz,
   created_at timestamptz not null default now(),
@@ -106,6 +124,33 @@ alter table public.problem_candidates
   add column if not exists user_id uuid references auth.users(id) on delete cascade;
 alter table public.problem_candidates
   alter column user_id set default auth.uid();
+
+alter table public.problem_candidates
+  add column if not exists auto_review_grade text check (auto_review_grade is null or auto_review_grade in ('A', 'B', 'C'));
+alter table public.problem_candidates
+  add column if not exists auto_review_score numeric check (auto_review_score is null or (auto_review_score >= 0 and auto_review_score <= 1));
+alter table public.problem_candidates
+  add column if not exists auto_review_reason text;
+alter table public.problem_candidates
+  add column if not exists manual_review_grade text check (manual_review_grade is null or manual_review_grade in ('A', 'B', 'C'));
+alter table public.problem_candidates
+  add column if not exists final_review_grade text check (final_review_grade is null or final_review_grade in ('A', 'B', 'C'));
+alter table public.problem_candidates
+  add column if not exists reviewed_by uuid references auth.users(id) on delete set null;
+alter table public.problem_candidates
+  add column if not exists review_source text default 'rule_based' check (review_source is null or review_source in ('rule_based', 'local_vlm', 'openai', 'manual'));
+alter table public.problem_candidates
+  add column if not exists review_version text default 'rule_based_crop_v1';
+
+update public.problem_candidates
+set manual_review_grade = review_grade
+where manual_review_grade is null
+  and review_grade is not null;
+
+update public.problem_candidates
+set final_review_grade = coalesce(manual_review_grade, auto_review_grade, review_grade)
+where final_review_grade is null
+  and coalesce(manual_review_grade, auto_review_grade, review_grade) is not null;
 
 do $$
 begin
@@ -138,6 +183,12 @@ create index if not exists problem_candidates_batch_id_idx
 on public.problem_candidates(batch_id);
 create index if not exists problem_candidates_review_status_idx
 on public.problem_candidates(review_status);
+create index if not exists problem_candidates_auto_review_grade_idx
+on public.problem_candidates(auto_review_grade);
+create index if not exists problem_candidates_final_review_grade_idx
+on public.problem_candidates(final_review_grade);
+create index if not exists problem_candidates_review_source_idx
+on public.problem_candidates(review_source);
 create index if not exists problem_candidates_question_number_idx
 on public.problem_candidates(question_number_guess);
 
@@ -252,3 +303,5 @@ using (
   and auth.uid() is not null
   and name like auth.uid()::text || '/%'
 );
+
+

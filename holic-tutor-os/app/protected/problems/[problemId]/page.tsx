@@ -1,8 +1,7 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, FileSearch, Save } from "lucide-react";
+import { ArrowLeft, FileSearch, Pencil } from "lucide-react";
 
-import { updateProblem } from "@/app/protected/problems/actions";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -11,9 +10,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { createClient } from "@/lib/supabase/server";
 import { PROBLEM_CANDIDATE_BUCKET } from "@/lib/tutor-os/problem-candidates";
 import type { Problem } from "@/lib/tutor-os/problems";
@@ -64,7 +60,6 @@ export default async function ProblemDetailPage({ params }: PageProps) {
   const { data: signedUrlData } = await supabase.storage
     .from(PROBLEM_CANDIDATE_BUCKET)
     .createSignedUrl(problem.image_storage_path, 60 * 60);
-  const updateAction = updateProblem.bind(null, problem.id);
 
   return (
     <div className="flex w-full flex-col gap-6">
@@ -81,12 +76,20 @@ export default async function ProblemDetailPage({ params }: PageProps) {
             {problem.question_number ?? "-"}번
           </p>
         </div>
-        <Button asChild variant="outline">
-          <Link href="/protected/problems">
-            <ArrowLeft />
-            문항 목록
-          </Link>
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button asChild variant="outline">
+            <Link href="/protected/problems">
+              <ArrowLeft />
+              문항 목록
+            </Link>
+          </Button>
+          <Button asChild>
+            <Link href={`/protected/problems/${problem.id}/edit`}>
+              <Pencil />
+              수정
+            </Link>
+          </Button>
+        </div>
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
@@ -127,7 +130,7 @@ export default async function ProblemDetailPage({ params }: PageProps) {
                 {infoRow("학기", problem.semester)}
                 {infoRow("시험명", problem.exam_name)}
                 {infoRow("단원", problem.unit)}
-                {infoRow("유형", problem.problem_type)}
+                {infoRow("세부 유형", problem.problem_type)}
                 {infoRow("난이도", problem.difficulty)}
                 {infoRow("검수 등급", problem.review_grade)}
               </div>
@@ -181,91 +184,6 @@ export default async function ProblemDetailPage({ params }: PageProps) {
           </Card>
         </div>
       </section>
-
-      <Card className="rounded-lg">
-        <CardHeader>
-          <CardTitle>문항 정보 수정</CardTitle>
-          <CardDescription>
-            이번 단계에서는 기본 정보와 풀이 메모만 간단히 수정합니다.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form action={updateAction} className="grid gap-5">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="grid gap-2 md:col-span-2">
-                <Label htmlFor="title">제목</Label>
-                <Input id="title" name="title" required defaultValue={problem.title} />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="school">학교</Label>
-                <Input id="school" name="school" defaultValue={problem.school ?? ""} />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="grade">학년</Label>
-                <Input id="grade" name="grade" defaultValue={problem.grade ?? ""} />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="year">연도</Label>
-                <Input id="year" name="year" inputMode="numeric" defaultValue={problem.year ?? ""} />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="semester">학기</Label>
-                <Input id="semester" name="semester" defaultValue={problem.semester ?? ""} />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="exam_name">시험명</Label>
-                <Input id="exam_name" name="exam_name" defaultValue={problem.exam_name ?? ""} />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="unit">단원</Label>
-                <Input id="unit" name="unit" defaultValue={problem.unit ?? ""} />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="problem_type">유형</Label>
-                <Input id="problem_type" name="problem_type" defaultValue={problem.problem_type ?? ""} />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="difficulty">난이도</Label>
-                <Input id="difficulty" name="difficulty" defaultValue={problem.difficulty ?? ""} />
-              </div>
-              <div className="grid gap-2 md:col-span-2">
-                <Label htmlFor="answer">정답</Label>
-                <Textarea id="answer" name="answer" defaultValue={problem.answer ?? ""} />
-              </div>
-              <div className="grid gap-2 md:col-span-2">
-                <Label htmlFor="core_idea">핵심 아이디어</Label>
-                <Textarea id="core_idea" name="core_idea" defaultValue={problem.core_idea ?? ""} />
-              </div>
-              <div className="grid gap-2 md:col-span-2">
-                <Label htmlFor="standard_solution">정석 풀이</Label>
-                <Textarea id="standard_solution" name="standard_solution" defaultValue={problem.standard_solution ?? ""} />
-              </div>
-              <div className="grid gap-2 md:col-span-2">
-                <Label htmlFor="elegant_solution">우아한 풀이</Label>
-                <Textarea id="elegant_solution" name="elegant_solution" defaultValue={problem.elegant_solution ?? ""} />
-              </div>
-              <div className="grid gap-2 md:col-span-2">
-                <Label htmlFor="mistake_points">오답 유발 포인트</Label>
-                <Textarea
-                  id="mistake_points"
-                  name="mistake_points"
-                  defaultValue={problem.mistake_points.join("\n")}
-                />
-              </div>
-              <div className="grid gap-2 md:col-span-2">
-                <Label htmlFor="teacher_note">선생님 메모</Label>
-                <Textarea id="teacher_note" name="teacher_note" defaultValue={problem.teacher_note ?? ""} />
-              </div>
-            </div>
-            <div>
-              <Button type="submit">
-                <Save />
-                저장
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
     </div>
   );
 }
