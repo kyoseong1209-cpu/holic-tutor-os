@@ -1,4 +1,5 @@
-﻿import type {
+import type { ParsedExamFilename } from "@/lib/parse-exam-filename";
+import type {
   ProblemCandidateBBox,
   ReviewGrade,
 } from "@/lib/tutor-os/problem-candidates";
@@ -22,6 +23,12 @@ export type Problem = {
   year: number | null;
   semester: string | null;
   exam_name: string | null;
+  subject: string | null;
+  unit_scope: string | null;
+  exam_sections: string[];
+  file_kind: string | null;
+  source_note: string | null;
+  parsed_metadata: ParsedExamFilename | null;
   source_pdf_name: string | null;
   question_number: number | null;
   unit: string | null;
@@ -44,3 +51,5 @@ export type Problem = {
 export type ProblemWithSignedUrl = Problem & {
   signedUrl: string | null;
 };
+
+

@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, FileSearch, Pencil } from "lucide-react";
 
@@ -20,6 +20,10 @@ type PageProps = {
 
 function optionalText(value: string | null | undefined) {
   return value && value.trim().length > 0 ? value : "아직 입력되지 않음";
+}
+
+function arrayText(value: string[] | null | undefined) {
+  return value && value.length > 0 ? value.join(", ") : null;
 }
 
 function infoRow(label: string, value: string | number | null | undefined) {
@@ -129,6 +133,11 @@ export default async function ProblemDetailPage({ params }: PageProps) {
                 {infoRow("연도", problem.year)}
                 {infoRow("학기", problem.semester)}
                 {infoRow("시험명", problem.exam_name)}
+                {infoRow("과목", problem.subject)}
+                {infoRow("단원 범위", problem.unit_scope)}
+                {infoRow("문제 구성", arrayText(problem.exam_sections))}
+                {infoRow("파일 종류", problem.file_kind)}
+                {infoRow("출처 메모", problem.source_note)}
                 {infoRow("단원", problem.unit)}
                 {infoRow("세부 유형", problem.problem_type)}
                 {infoRow("난이도", problem.difficulty)}

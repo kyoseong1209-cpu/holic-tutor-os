@@ -1,4 +1,6 @@
-﻿export const PROBLEM_CANDIDATE_BUCKET = "problem-candidates";
+import type { ParsedExamFilename } from "@/lib/parse-exam-filename";
+
+export const PROBLEM_CANDIDATE_BUCKET = "problem-candidates";
 
 export const REVIEW_STATUSES = [
   "pending",
@@ -33,6 +35,17 @@ export type CropImportBatch = {
   id: string;
   user_id: string;
   source_pdf_name: string | null;
+  school: string | null;
+  grade: string | null;
+  year: number | null;
+  semester: string | null;
+  exam_name: string | null;
+  subject: string | null;
+  unit_scope: string | null;
+  exam_sections: string[];
+  file_kind: string | null;
+  source_note: string | null;
+  parsed_metadata: ParsedExamFilename | null;
   crop_version: string;
   output_run_id: string | null;
   expected_count: number | null;
@@ -98,6 +111,8 @@ export type CropCoordinatesCandidate = {
 
 export type CropCoordinatesFile = {
   input_pdf?: string;
+  source_pdf_name?: string;
+  parsed_metadata?: ParsedExamFilename | null;
   crop_version?: string;
   expected_count?: number | null;
   detected_anchor_count?: number | null;
@@ -371,3 +386,5 @@ export function isReviewGrade(value: string): value is ReviewGrade {
 export function isReviewSource(value: string): value is ReviewSource {
   return REVIEW_SOURCES.includes(value as ReviewSource);
 }
+
+

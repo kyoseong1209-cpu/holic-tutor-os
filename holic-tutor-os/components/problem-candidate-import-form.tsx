@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -14,7 +14,13 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { createClient } from "@/lib/supabase/client";
+import {
+  metadataConfidenceLabel,
+  parseExamFilename,
+  type ParsedExamFilename,
+} from "@/lib/parse-exam-filename";
 import {
   PROBLEM_CANDIDATE_BUCKET,
   autoReviewCropCandidate,
@@ -29,6 +35,32 @@ type Message = {
   text: string;
 };
 
+type MetadataFormState = {
+  school: string;
+  grade: string;
+  year: string;
+  semester: string;
+  exam_name: string;
+  subject: string;
+  unit_scope: string;
+  exam_sections: string;
+  file_kind: string;
+  source_note: string;
+};
+
+const EMPTY_METADATA: MetadataFormState = {
+  school: "",
+  grade: "",
+  year: "",
+  semester: "",
+  exam_name: "",
+  subject: "",
+  unit_scope: "",
+  exam_sections: "",
+  file_kind: "",
+  source_note: "",
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -40,6 +72,12 @@ function numberOrNull(value: unknown) {
 function numberArray(value: unknown) {
   return Array.isArray(value)
     ? value.filter((item): item is number => typeof item === "number" && Number.isFinite(item))
+    : [];
+}
+
+function stringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
     : [];
 }
 
@@ -81,6 +119,24 @@ function parseCandidate(value: unknown): CropCoordinatesCandidate | null {
   };
 }
 
+function parsedMetadataFromJson(value: unknown): ParsedExamFilename | null {
+  if (!isRecord(value)) return null;
+
+  return {
+    school: typeof value.school === "string" ? value.school : null,
+    grade: typeof value.grade === "string" ? value.grade : null,
+    year: numberOrNull(value.year),
+    semester: typeof value.semester === "string" ? value.semester : null,
+    exam_name: typeof value.exam_name === "string" ? value.exam_name : null,
+    subject: typeof value.subject === "string" ? value.subject : null,
+    unit_scope: typeof value.unit_scope === "string" ? value.unit_scope : null,
+    exam_sections: stringArray(value.exam_sections),
+    file_kind: typeof value.file_kind === "string" ? value.file_kind : null,
+    confidence: numberOrNull(value.confidence) ?? 0,
+    warnings: stringArray(value.warnings),
+  };
+}
+
 function parseCoordinatesJson(raw: string): CropCoordinatesFile {
   const parsed: unknown = JSON.parse(raw);
   if (!isRecord(parsed) || !Array.isArray(parsed.candidates)) {
@@ -97,6 +153,8 @@ function parseCoordinatesJson(raw: string): CropCoordinatesFile {
 
   return {
     input_pdf: typeof parsed.input_pdf === "string" ? parsed.input_pdf : undefined,
+    source_pdf_name: typeof parsed.source_pdf_name === "string" ? parsed.source_pdf_name : undefined,
+    parsed_metadata: parsedMetadataFromJson(parsed.parsed_metadata),
     crop_version: typeof parsed.crop_version === "string" ? parsed.crop_version : undefined,
     expected_count: numberOrNull(parsed.expected_count),
     detected_anchor_count: numberOrNull(parsed.detected_anchor_count),
@@ -117,7 +175,57 @@ function basename(path: string | undefined) {
 }
 
 function sourcePdfNameFromCoordinates(coordinates: CropCoordinatesFile) {
-  return basename(coordinates.input_pdf) || "";
+  return coordinates.source_pdf_name || basename(coordinates.input_pdf) || "";
+}
+
+function metadataToForm(metadata: ParsedExamFilename): MetadataFormState {
+  return {
+    school: metadata.school ?? "",
+    grade: metadata.grade ?? "",
+    year: metadata.year ? String(metadata.year) : "",
+    semester: metadata.semester ?? "",
+    exam_name: metadata.exam_name ?? "",
+    subject: metadata.subject ?? "",
+    unit_scope: metadata.unit_scope ?? "",
+    exam_sections: metadata.exam_sections.join(","),
+    file_kind: metadata.file_kind ?? "",
+    source_note: "",
+  };
+}
+
+function splitSections(value: string) {
+  return value
+    .split(/[,，\/\r\n]+/)
+    .map((section) => section.trim())
+    .filter(Boolean);
+}
+
+function yearNumber(value: string) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function metadataPayload(
+  sourcePdfName: string,
+  metadata: MetadataFormState,
+  confidence: number | null,
+  warnings: string[],
+): ParsedExamFilename {
+  const reparsed = parseExamFilename(sourcePdfName);
+
+  return {
+    school: metadata.school.trim() || null,
+    grade: metadata.grade.trim() || null,
+    year: yearNumber(metadata.year),
+    semester: metadata.semester.trim() || null,
+    exam_name: metadata.exam_name.trim() || null,
+    subject: metadata.subject.trim() || null,
+    unit_scope: metadata.unit_scope.trim() || null,
+    exam_sections: splitSections(metadata.exam_sections),
+    file_kind: metadata.file_kind.trim() || null,
+    confidence: confidence ?? reparsed.confidence,
+    warnings,
+  };
 }
 
 type SupabaseLikeError = {
@@ -175,8 +283,38 @@ export function ProblemCandidateImportForm() {
   const [sourcePdfName, setSourcePdfName] = useState("");
   const [cropVersion, setCropVersion] = useState("v4");
   const [expectedCount, setExpectedCount] = useState("22");
+  const [metadata, setMetadata] = useState<MetadataFormState>(EMPTY_METADATA);
+  const [metadataConfidence, setMetadataConfidence] = useState<number | null>(null);
+  const [metadataWarnings, setMetadataWarnings] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState<Message | null>(null);
+
+  async function handleCoordinatesChange(file: File | null) {
+    setCoordinatesFile(file);
+    setMessage(null);
+    if (!file) return;
+
+    try {
+      const coordinates = parseCoordinatesJson(await file.text());
+      const detectedSourcePdfName =
+        sourcePdfNameFromCoordinates(coordinates) || sourcePdfName.trim() || "unknown.pdf";
+      const parsedMetadata = coordinates.parsed_metadata ?? parseExamFilename(detectedSourcePdfName);
+
+      setSourcePdfName(detectedSourcePdfName);
+      setCropVersion((current) => coordinates.crop_version || current || "v4");
+      setExpectedCount((current) =>
+        coordinates.expected_count ? String(coordinates.expected_count) : current,
+      );
+      setMetadata(metadataToForm(parsedMetadata));
+      setMetadataConfidence(parsedMetadata.confidence);
+      setMetadataWarnings(parsedMetadata.warnings);
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : "crop_coordinates.json을 읽지 못했습니다.",
+      });
+    }
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -219,6 +357,12 @@ export function ProblemCandidateImportForm() {
       const finalExpectedCount = Number.isFinite(parsedExpectedCount)
         ? parsedExpectedCount
         : coordinates.expected_count;
+      const finalMetadata = metadataPayload(
+        finalSourcePdfName,
+        metadata,
+        metadataConfidence,
+        metadataWarnings,
+      );
 
       const imagesByStem = new Map(imageFiles.map((file) => [fileStem(file.name), file]));
       const missingImages = coordinates.candidates
@@ -234,6 +378,17 @@ export function ProblemCandidateImportForm() {
         .from("crop_import_batches")
         .insert({
           source_pdf_name: finalSourcePdfName,
+          school: finalMetadata.school,
+          grade: finalMetadata.grade,
+          year: finalMetadata.year,
+          semester: finalMetadata.semester,
+          exam_name: finalMetadata.exam_name,
+          subject: finalMetadata.subject,
+          unit_scope: finalMetadata.unit_scope,
+          exam_sections: finalMetadata.exam_sections,
+          file_kind: finalMetadata.file_kind,
+          source_note: metadata.source_note.trim() || null,
+          parsed_metadata: finalMetadata,
           crop_version: finalCropVersion,
           output_run_id: outputRunId,
           expected_count: finalExpectedCount,
@@ -376,19 +531,19 @@ export function ProblemCandidateImportForm() {
       <CardHeader>
         <CardTitle>crop 결과 가져오기</CardTitle>
         <CardDescription>
-          업로드 즉시 규칙 기반 자동 검수를 실행하고, 사람은 검수 필요 후보부터 확인합니다.
+          파일명에서 시험지 공통 정보를 자동 추출하고, 업로드 즉시 규칙 기반 자동 검수를 실행합니다.
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form className="grid gap-5" onSubmit={handleSubmit}>
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="grid gap-2">
+            <div className="grid gap-2 md:col-span-2">
               <Label htmlFor="source_pdf_name">원본 PDF 이름</Label>
               <Input
                 id="source_pdf_name"
                 value={sourcePdfName}
                 onChange={(event) => setSourcePdfName(event.target.value)}
-                placeholder="예: 홍익여고_1학년_1학기.pdf"
+                placeholder="예: 숭문고등학교_1학년_2026_1학기중간_공통수학1_선택,공통_문제.pdf"
               />
             </div>
             <div className="grid gap-2">
@@ -420,7 +575,7 @@ export function ProblemCandidateImportForm() {
                 id="coordinates"
                 accept="application/json,.json"
                 type="file"
-                onChange={(event) => setCoordinatesFile(event.target.files?.[0] ?? null)}
+                onChange={(event) => void handleCoordinatesChange(event.target.files?.[0] ?? null)}
               />
               {coordinatesFile ? (
                 <p className="text-sm text-muted-foreground">{coordinatesFile.name}</p>
@@ -441,6 +596,50 @@ export function ProblemCandidateImportForm() {
               <p className="text-sm text-muted-foreground">{imageFiles.length}개 선택됨</p>
             </div>
           </div>
+
+          <Card className="rounded-lg border-dashed">
+            <CardHeader>
+              <CardTitle className="text-base">파일명 자동 추출 정보</CardTitle>
+              <CardDescription>
+                confidence {metadataConfidence ?? "-"}
+                {metadataConfidence !== null ? ` (${metadataConfidenceLabel(metadataConfidence)})` : ""}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              <MetadataInput label="학교" name="school" value={metadata.school} onChange={(value) => setMetadata((current) => ({ ...current, school: value }))} />
+              <MetadataInput label="학년" name="grade" value={metadata.grade} onChange={(value) => setMetadata((current) => ({ ...current, grade: value }))} />
+              <MetadataInput label="연도" name="year" value={metadata.year} onChange={(value) => setMetadata((current) => ({ ...current, year: value }))} />
+              <MetadataInput label="학기" name="semester" value={metadata.semester} onChange={(value) => setMetadata((current) => ({ ...current, semester: value }))} />
+              <MetadataInput label="시험명" name="exam_name" value={metadata.exam_name} onChange={(value) => setMetadata((current) => ({ ...current, exam_name: value }))} />
+              <MetadataInput label="과목" name="subject" value={metadata.subject} onChange={(value) => setMetadata((current) => ({ ...current, subject: value }))} />
+              <MetadataInput label="단원 범위" name="unit_scope" value={metadata.unit_scope} onChange={(value) => setMetadata((current) => ({ ...current, unit_scope: value }))} />
+              <MetadataInput label="문제 범위/구성" name="exam_sections" value={metadata.exam_sections} onChange={(value) => setMetadata((current) => ({ ...current, exam_sections: value }))} />
+              <MetadataInput label="파일 종류" name="file_kind" value={metadata.file_kind} onChange={(value) => setMetadata((current) => ({ ...current, file_kind: value }))} />
+              <div className="grid gap-2 md:col-span-2">
+                <Label htmlFor="source_note">출처 메모</Label>
+                <Textarea
+                  id="source_note"
+                  value={metadata.source_note}
+                  onChange={(event) => setMetadata((current) => ({ ...current, source_note: event.target.value }))}
+                  placeholder="예: 파일명 자동 추출 후 직접 확인 완료"
+                />
+              </div>
+              {metadataWarnings.length > 0 ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100 md:col-span-2">
+                  <p className="font-medium">확인 필요</p>
+                  <ul className="mt-2 list-inside list-disc">
+                    {metadataWarnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : metadataConfidence !== null ? (
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200 md:col-span-2">
+                  자동 추출 완료
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
 
           {message ? (
             <div
@@ -463,5 +662,24 @@ export function ProblemCandidateImportForm() {
         </form>
       </CardContent>
     </Card>
+  );
+}
+
+function MetadataInput({
+  label,
+  name,
+  value,
+  onChange,
+}: {
+  label: string;
+  name: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={name}>{label}</Label>
+      <Input id={name} value={value} onChange={(event) => onChange(event.target.value)} />
+    </div>
   );
 }

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import {
@@ -121,7 +121,37 @@ export function ProblemEditForm({ problem }: { problem: Problem }) {
             <Input id="exam_name" name="exam_name" defaultValue={problem.exam_name ?? ""} />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="unit">단원</Label>
+            <Label htmlFor="subject">과목</Label>
+            <Input id="subject" name="subject" defaultValue={problem.subject ?? ""} />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="unit_scope">파일명 범위</Label>
+            <Input id="unit_scope" name="unit_scope" defaultValue={problem.unit_scope ?? ""} />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="exam_sections">문제 구성</Label>
+            <Input
+              id="exam_sections"
+              name="exam_sections"
+              defaultValue={problem.exam_sections?.join(", ") ?? ""}
+              placeholder="예: 선택, 공통"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="file_kind">파일 종류</Label>
+            <Input id="file_kind" name="file_kind" defaultValue={problem.file_kind ?? ""} />
+          </div>
+          <div className="grid gap-2 md:col-span-2">
+            <Label htmlFor="source_note">출처 메모</Label>
+            <Textarea
+              id="source_note"
+              name="source_note"
+              defaultValue={problem.source_note ?? ""}
+              placeholder="예: 파일명 자동 추출 후 확인 완료"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="unit">문항 단원</Label>
             <Input id="unit" name="unit" defaultValue={problem.unit ?? ""} />
           </div>
           <div className="grid gap-2">

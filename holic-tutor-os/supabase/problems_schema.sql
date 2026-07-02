@@ -26,6 +26,12 @@ create table if not exists public.problems (
   year integer,
   semester text,
   exam_name text,
+  subject text,
+  unit_scope text,
+  exam_sections text[] not null default '{}',
+  file_kind text,
+  source_note text,
+  parsed_metadata jsonb,
   source_pdf_name text,
   question_number integer check (question_number is null or question_number > 0),
 
@@ -54,6 +60,18 @@ alter table public.problems
   add column if not exists user_id uuid references auth.users(id) on delete cascade;
 alter table public.problems
   alter column user_id set default auth.uid();
+alter table public.problems
+  add column if not exists subject text;
+alter table public.problems
+  add column if not exists unit_scope text;
+alter table public.problems
+  add column if not exists exam_sections text[] not null default '{}';
+alter table public.problems
+  add column if not exists file_kind text;
+alter table public.problems
+  add column if not exists source_note text;
+alter table public.problems
+  add column if not exists parsed_metadata jsonb;
 
 alter table public.problem_candidates
   add column if not exists promoted_at timestamptz;
@@ -97,3 +115,4 @@ drop policy if exists "problems_delete_own" on public.problems;
 create policy "problems_delete_own"
 on public.problems for delete to authenticated
 using (auth.uid() is not null and user_id = auth.uid());
+

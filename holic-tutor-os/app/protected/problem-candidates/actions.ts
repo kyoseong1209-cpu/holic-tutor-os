@@ -1,4 +1,4 @@
-﻿"use server";
+"use server";
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -349,6 +349,17 @@ type PromotionCandidateRow = {
 type PromotionBatchRow = {
   id: string;
   source_pdf_name: string | null;
+  school: string | null;
+  grade: string | null;
+  year: number | null;
+  semester: string | null;
+  exam_name: string | null;
+  subject: string | null;
+  unit_scope: string | null;
+  exam_sections: string[] | null;
+  file_kind: string | null;
+  source_note: string | null;
+  parsed_metadata: unknown;
   crop_version: string;
 };
 
@@ -446,6 +457,17 @@ async function promoteCandidateRows(
           sourcePdfName: batch.source_pdf_name ?? candidate.source_pdf_name,
           questionNumber: candidate.question_number_guess,
         }),
+        school: batch.school,
+        grade: batch.grade,
+        year: batch.year,
+        semester: batch.semester,
+        exam_name: batch.exam_name,
+        subject: batch.subject,
+        unit_scope: batch.unit_scope,
+        exam_sections: batch.exam_sections ?? [],
+        file_kind: batch.file_kind,
+        source_note: batch.source_note,
+        parsed_metadata: batch.parsed_metadata,
         source_pdf_name: batch.source_pdf_name ?? candidate.source_pdf_name,
         question_number: candidate.question_number_guess,
         image_storage_path: candidate.image_path,
@@ -506,7 +528,7 @@ export async function promoteApprovedBatchCandidates(
 
   const { data: batchData, error: batchError } = await supabase
     .from("crop_import_batches")
-    .select("id,source_pdf_name,crop_version")
+    .select("id,source_pdf_name,school,grade,year,semester,exam_name,subject,unit_scope,exam_sections,file_kind,source_note,parsed_metadata,crop_version")
     .eq("id", batchId)
     .eq("user_id", user.id)
     .single();
@@ -557,7 +579,7 @@ export async function promoteProblemCandidate(
 
   const { data: batchData, error: batchError } = await supabase
     .from("crop_import_batches")
-    .select("id,source_pdf_name,crop_version")
+    .select("id,source_pdf_name,school,grade,year,semester,exam_name,subject,unit_scope,exam_sections,file_kind,source_note,parsed_metadata,crop_version")
     .eq("id", candidate.batch_id)
     .eq("user_id", user.id)
     .single();
@@ -568,3 +590,5 @@ export async function promoteProblemCandidate(
 
   return promoteCandidateRows([candidate], batchData as PromotionBatchRow);
 }
+
+

@@ -1,4 +1,4 @@
-﻿"use server";
+"use server";
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -42,6 +42,13 @@ function nullableInteger(formData: FormData, key: string) {
 
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sections(formData: FormData, key: string) {
+  return text(formData, key)
+    .split(/[,，\/\r\n]+/)
+    .map((section) => section.trim())
+    .filter(Boolean);
 }
 
 function lines(formData: FormData, key: string) {
@@ -102,6 +109,11 @@ export async function updateProblem(
         year: nullableInteger(formData, "year"),
         semester: nullableText(formData, "semester"),
         exam_name: nullableText(formData, "exam_name"),
+        subject: nullableText(formData, "subject"),
+        unit_scope: nullableText(formData, "unit_scope"),
+        exam_sections: sections(formData, "exam_sections"),
+        file_kind: nullableText(formData, "file_kind"),
+        source_note: nullableText(formData, "source_note"),
         unit: nullableText(formData, "unit"),
         problem_type: nullableText(formData, "problem_type"),
         difficulty,
@@ -134,4 +146,3 @@ export async function updateProblem(
     return failure(`문항 정보 저장에 실패했습니다. ${errorMessage(error)}`);
   }
 }
-

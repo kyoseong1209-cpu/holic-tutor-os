@@ -1,4 +1,4 @@
-﻿-- Holic Tutor OS problem candidate review schema
+-- Holic Tutor OS problem candidate review schema
 -- Run this in Supabase Dashboard > SQL Editor.
 -- The app uses user_id consistently. If an older owner_id column exists, this
 -- migration renames it to user_id and makes user_id default to auth.uid().
@@ -54,6 +54,17 @@ create table if not exists public.crop_import_batches (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   source_pdf_name text,
+  school text,
+  grade text,
+  year integer,
+  semester text,
+  exam_name text,
+  subject text,
+  unit_scope text,
+  exam_sections text[] not null default '{}',
+  file_kind text,
+  source_note text,
+  parsed_metadata jsonb,
   crop_version text not null default 'v4',
   output_run_id text,
   expected_count integer check (expected_count is null or expected_count > 0),
@@ -78,6 +89,7 @@ create table if not exists public.problem_candidates (
   page_number integer not null check (page_number > 0),
   image_path text not null,
   source_pdf_name text,
+
   crop_version text not null default 'v4',
   bbox jsonb not null,
   confidence numeric check (confidence is null or (confidence >= 0 and confidence <= 1)),
@@ -119,6 +131,28 @@ alter table public.crop_import_batches
   add column if not exists user_id uuid references auth.users(id) on delete cascade;
 alter table public.crop_import_batches
   alter column user_id set default auth.uid();
+alter table public.crop_import_batches
+  add column if not exists school text;
+alter table public.crop_import_batches
+  add column if not exists grade text;
+alter table public.crop_import_batches
+  add column if not exists year integer;
+alter table public.crop_import_batches
+  add column if not exists semester text;
+alter table public.crop_import_batches
+  add column if not exists exam_name text;
+alter table public.crop_import_batches
+  add column if not exists subject text;
+alter table public.crop_import_batches
+  add column if not exists unit_scope text;
+alter table public.crop_import_batches
+  add column if not exists exam_sections text[] not null default '{}';
+alter table public.crop_import_batches
+  add column if not exists file_kind text;
+alter table public.crop_import_batches
+  add column if not exists source_note text;
+alter table public.crop_import_batches
+  add column if not exists parsed_metadata jsonb;
 
 alter table public.problem_candidates
   add column if not exists user_id uuid references auth.users(id) on delete cascade;
@@ -177,6 +211,12 @@ create index if not exists crop_import_batches_user_id_idx
 on public.crop_import_batches(user_id);
 create index if not exists crop_import_batches_created_at_idx
 on public.crop_import_batches(created_at desc);
+create index if not exists crop_import_batches_school_idx
+on public.crop_import_batches(school);
+create index if not exists crop_import_batches_year_idx
+on public.crop_import_batches(year);
+create index if not exists crop_import_batches_subject_idx
+on public.crop_import_batches(subject);
 create index if not exists problem_candidates_user_id_idx
 on public.problem_candidates(user_id);
 create index if not exists problem_candidates_batch_id_idx
@@ -303,5 +343,6 @@ using (
   and auth.uid() is not null
   and name like auth.uid()::text || '/%'
 );
+
 
 

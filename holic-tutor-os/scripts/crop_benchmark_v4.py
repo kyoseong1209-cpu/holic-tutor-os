@@ -19,6 +19,217 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT = PROJECT_ROOT / "crop_inputs" / "sample.pdf"
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "crop_outputs_v4"
 
+
+SUBJECTS = (
+    "확률과통계",
+    "확률과 통계",
+    "공통수학1",
+    "공통수학2",
+    "공통수학",
+    "미적분",
+    "기하",
+    "대수",
+    "수학",
+)
+FILE_KINDS = ("문제", "해설", "정답")
+SECTION_KEYWORDS = ("선택", "공통", "서답형", "객관식")
+
+
+def split_exam_filename_tokens(file_name: str) -> list[str]:
+    stem = Path(file_name).name.rsplit(".", 1)[0]
+    return [token.strip() for token in re.split(r"[_\s]+", stem) if token.strip()]
+
+
+def is_high_school_name(school: str | None) -> bool:
+    return bool(school and re.search(r"고등학교|여고|남고|고$", school))
+
+
+def is_middle_school_name(school: str | None) -> bool:
+    return bool(school and re.search(r"중학교|중$", school))
+
+
+def parse_grade_token(token: str, school: str | None) -> str | None:
+    direct = re.match(r"^(고|중)\s*([1-3])$", token)
+    if direct:
+        return f"{direct.group(1)}{direct.group(2)}"
+    grade_only = re.match(r"^([1-3])학년$", token)
+    if not grade_only:
+        return None
+    if is_high_school_name(school):
+        return f"고{grade_only.group(1)}"
+    if is_middle_school_name(school):
+        return f"중{grade_only.group(1)}"
+    return f"{grade_only.group(1)}학년"
+
+
+def parse_year_token(token: str) -> int | None:
+    return int(token) if re.match(r"^\d{4}$", token) else None
+
+
+def parse_semester_token(token: str) -> str | None:
+    match = re.search(r"([12])학기", token)
+    return f"{match.group(1)}학기" if match else None
+
+
+def parse_exam_name_token(token: str) -> str | None:
+    if "중간" in token:
+        return "중간고사"
+    if "기말" in token:
+        return "기말고사"
+    return None
+
+
+def parse_file_kind_token(token: str) -> str | None:
+    return next((kind for kind in FILE_KINDS if kind in token), None)
+
+
+def normalized_subject(value: str) -> str:
+    return re.sub(r"\s+", "", value)
+
+
+def parse_subject_token(token: str) -> str | None:
+    normalized = normalized_subject(token)
+    return next((subject for subject in SUBJECTS if normalized_subject(subject) == normalized), None)
+
+
+def parse_sections_token(token: str) -> list[str]:
+    if parse_subject_token(token):
+        return []
+    parts = [part.strip() for part in re.split(r"[,，/]+", token) if part.strip()]
+
+    def is_section(part: str) -> bool:
+        compact = normalized_subject(part)
+        return any(
+            compact == keyword or (keyword != "공통" and compact.startswith(keyword))
+            for keyword in SECTION_KEYWORDS
+        )
+
+    return [part for part in parts if is_section(part)]
+
+
+def is_known_metadata_token(token: str, school: str | None) -> bool:
+    return bool(
+        parse_grade_token(token, school)
+        or parse_year_token(token)
+        or parse_semester_token(token)
+        or parse_exam_name_token(token)
+        or parse_file_kind_token(token)
+        or parse_subject_token(token)
+        or parse_sections_token(token)
+    )
+
+
+def unique_strings(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    output: list[str] = []
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            output.append(value)
+    return output
+
+
+def metadata_score(metadata: dict[str, object]) -> float:
+    score = 0.18
+    if metadata.get("school"):
+        score += 0.12
+    if metadata.get("grade"):
+        score += 0.10
+    if metadata.get("year"):
+        score += 0.12
+    if metadata.get("semester"):
+        score += 0.10
+    if metadata.get("exam_name"):
+        score += 0.12
+    if metadata.get("subject"):
+        score += 0.12
+    if metadata.get("file_kind"):
+        score += 0.08
+    if metadata.get("exam_sections"):
+        score += 0.04
+    if metadata.get("unit_scope"):
+        score += 0.04
+    return round(min(1.0, score), 2)
+
+
+def parse_exam_filename(file_name: str) -> dict[str, object]:
+    tokens = split_exam_filename_tokens(file_name)
+    school: str | None = None
+    grade: str | None = None
+    year: int | None = None
+    semester: str | None = None
+    exam_name: str | None = None
+    subject: str | None = None
+    file_kind: str | None = None
+    exam_sections: list[str] = []
+    unit_scope_tokens: list[str] = []
+    subject_index = -1
+
+    first_metadata_index = -1
+    for index, token in enumerate(tokens):
+        if is_known_metadata_token(token, None):
+            first_metadata_index = index
+            break
+    if first_metadata_index > 0:
+        school = "_".join(tokens[:first_metadata_index])
+    elif tokens and not is_known_metadata_token(tokens[0], None):
+        school = tokens[0]
+
+    for index, token in enumerate(tokens):
+        grade = grade or parse_grade_token(token, school)
+        year = year or parse_year_token(token)
+        semester = semester or parse_semester_token(token)
+        exam_name = exam_name or parse_exam_name_token(token)
+        file_kind = file_kind or parse_file_kind_token(token)
+        parsed_subject = parse_subject_token(token)
+        if subject is None and parsed_subject:
+            subject = parsed_subject
+            subject_index = index
+        exam_sections.extend(parse_sections_token(token))
+
+    for index, token in enumerate(tokens):
+        if subject_index < 0 or index <= subject_index:
+            continue
+        if (
+            parse_file_kind_token(token)
+            or parse_sections_token(token)
+            or parse_semester_token(token)
+            or parse_exam_name_token(token)
+            or parse_year_token(token)
+            or parse_grade_token(token, school)
+            or parse_subject_token(token)
+        ):
+            continue
+        unit_scope_tokens.append(token)
+
+    metadata: dict[str, object] = {
+        "school": school,
+        "grade": grade,
+        "year": year,
+        "semester": semester,
+        "exam_name": exam_name,
+        "subject": subject,
+        "unit_scope": "_".join(unit_scope_tokens) if unit_scope_tokens else None,
+        "exam_sections": unique_strings(exam_sections),
+        "file_kind": file_kind,
+    }
+    warnings: list[str] = []
+    labels = {
+        "school": "학교명을 확인해 주세요.",
+        "grade": "학년을 확인해 주세요.",
+        "year": "연도를 확인해 주세요.",
+        "semester": "학기를 확인해 주세요.",
+        "exam_name": "시험명을 확인해 주세요.",
+        "subject": "과목을 확인해 주세요.",
+        "file_kind": "문제/해설/정답 여부를 확인해 주세요.",
+    }
+    for key, message in labels.items():
+        if not metadata.get(key):
+            warnings.append(message)
+    metadata["confidence"] = metadata_score(metadata)
+    metadata["warnings"] = warnings
+    return metadata
+
 ANCHOR_PATTERNS = (
     ("number_dot_essay", re.compile(r"^\s*(?P<number>\d{1,2})\s*\.\s*(?P<label>\[서답형\s*\d+\])?")),
     ("number_paren_essay", re.compile(r"^\s*(?P<number>\d{1,2})\s*\)\s*(?P<label>\[서답형\s*\d+\])?")),
@@ -1165,11 +1376,15 @@ def write_outputs(
     blank_or_low_ink = [candidate for candidate in candidates if "blank_or_low_ink_candidate" in candidate.notes]
     per_page = Counter(candidate.page_number for candidate in candidates)
     detected_numbers, missing_numbers, duplicate_numbers = sequence_report(anchors, expected_count)
+    source_pdf_name = input_pdf.name
+    parsed_metadata = parse_exam_filename(source_pdf_name)
 
     (run_dir / "anchors_debug.json").write_text(
         json.dumps(
             {
                 "input_pdf": str(input_pdf),
+                "source_pdf_name": source_pdf_name,
+                "parsed_metadata": parsed_metadata,
                 "dpi": dpi,
                 "method": "v4_layout_first_relaxed_anchor_recall",
                 "expected_count": expected_count,
@@ -1189,6 +1404,8 @@ def write_outputs(
         json.dumps(
             {
                 "input_pdf": str(input_pdf),
+                "source_pdf_name": source_pdf_name,
+                "parsed_metadata": parsed_metadata,
                 "dpi": dpi,
                 "method": "v4_layout_first_relaxed_anchor_recall",
                 "coordinate_system": "pixel coordinates on rendered page PNGs",
@@ -1213,6 +1430,7 @@ def write_outputs(
 
 ## 기본 정보
 - 입력 PDF명: `{input_pdf.name}`
+- 자동 추출 메타데이터: `{json.dumps(parsed_metadata, ensure_ascii=False)}`
 - 입력 PDF 경로: `{input_pdf}`
 - 출력 폴더: `{run_dir}`
 - 렌더링 DPI: {dpi}
@@ -1409,4 +1627,8 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
 

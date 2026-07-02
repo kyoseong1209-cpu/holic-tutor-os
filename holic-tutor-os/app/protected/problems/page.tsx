@@ -24,11 +24,15 @@ function matchesQuery(problem: Problem, query: string) {
   const haystack = [
     problem.title,
     problem.source_pdf_name,
+    problem.school,
+    problem.grade,
+    problem.subject,
+    problem.unit_scope,
+    problem.exam_sections?.join(" "),
+    problem.file_kind,
     problem.unit,
     problem.problem_type,
     problem.difficulty,
-    problem.school,
-    problem.grade,
   ]
     .filter(Boolean)
     .join(" ")
@@ -127,6 +131,10 @@ function valueOrEmpty(value: string | number | null | undefined) {
   return value ?? "-";
 }
 
+function arrayOrEmpty(value: string[] | null | undefined) {
+  return value && value.length > 0 ? value.join(", ") : "-";
+}
+
 function ProblemCard({ problem }: { problem: ProblemWithSignedUrl }) {
   return (
     <Card className="overflow-hidden rounded-lg">
@@ -151,11 +159,16 @@ function ProblemCard({ problem }: { problem: ProblemWithSignedUrl }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-2 text-sm text-muted-foreground">
-        <p>단원: {valueOrEmpty(problem.unit)}</p>
-        <p>유형: {valueOrEmpty(problem.problem_type)}</p>
-        <p>난이도: {valueOrEmpty(problem.difficulty)}</p>
+        <p>학교/학년: {valueOrEmpty(problem.school)} · {valueOrEmpty(problem.grade)}</p>
+        <p>연도/시험: {valueOrEmpty(problem.year)} · {valueOrEmpty(problem.semester)} · {valueOrEmpty(problem.exam_name)}</p>
+        <p>과목: {valueOrEmpty(problem.subject)}</p>
+        <p>범위: {valueOrEmpty(problem.unit_scope || problem.unit)}</p>
+        <p>구성: {arrayOrEmpty(problem.exam_sections)}</p>
+        <p>유형/난이도: {valueOrEmpty(problem.problem_type)} · {valueOrEmpty(problem.difficulty)}</p>
         <p>등록일: {new Date(problem.created_at).toLocaleDateString("ko-KR")}</p>
       </CardContent>
     </Card>
   );
 }
+
+
