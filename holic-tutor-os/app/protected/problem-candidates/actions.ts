@@ -107,6 +107,10 @@ type StoragePathRow = {
   image_path: string | null;
 };
 
+type ProblemImagePathRow = {
+  image_storage_path: string | null;
+};
+
 type BatchStorageRow = {
   id: string;
   coordinates_path: string | null;
@@ -173,11 +177,34 @@ export async function deleteProblemCandidateBatch(
   const imagePaths = ((candidateRows ?? []) as StoragePathRow[]).map(
     (candidate) => candidate.image_path,
   );
+  const existingImagePaths = uniqueStoragePaths(imagePaths);
+  let protectedImagePaths = new Set<string>();
+  if (existingImagePaths.length > 0) {
+    const { data: problemRows, error: problemRowsError } = await supabase
+      .from("problems")
+      .select("image_storage_path")
+      .eq("user_id", user.id)
+      .in("image_storage_path", existingImagePaths);
+
+    if (problemRowsError) {
+      return {
+        status: "error",
+        message: `문항 DB 이미지 보호 조회 실패: ${errorMessage(problemRowsError)}`,
+      };
+    }
+
+    protectedImagePaths = new Set(
+      ((problemRows ?? []) as ProblemImagePathRow[])
+        .map((problem) => problem.image_storage_path)
+        .filter((path): path is string => Boolean(path)),
+    );
+  }
+
   const storagePaths = uniqueStoragePaths([
     batch.coordinates_path,
     batch.contact_sheet_path,
     batch.summary_path,
-    ...imagePaths,
+    ...imagePaths.filter((path) => !protectedImagePaths.has(path ?? "")),
   ]);
 
   let storageDeleteMessage: string | null = null;
@@ -234,5 +261,233 @@ export async function deleteProblemCandidateBatch(
     status: "success",
     message: "가져오기 묶음이 삭제되었습니다",
   };
+}
+
+export type PromotionResult = {
+  status: "success" | "error";
+  message: string;
+  promotedCount: number;
+  skippedCount: number;
+  failedCount: number;
+};
+
+type PromotionCandidateRow = {
+  id: string;
+  batch_id: string;
+  candidate_id: string;
+  question_number_guess: number | null;
+  image_path: string;
+  source_pdf_name: string | null;
+  crop_version: string;
+  bbox: unknown;
+  review_status: string;
+  review_grade: ReviewGrade | null;
+  promoted_at: string | null;
+  promoted_problem_id: string | null;
+};
+
+type PromotionBatchRow = {
+  id: string;
+  source_pdf_name: string | null;
+  crop_version: string;
+};
+
+function problemTitle(input: {
+  sourcePdfName: string | null;
+  questionNumber: number | null;
+}) {
+  const sourceName = input.sourcePdfName || "출처 미상";
+  return input.questionNumber ? `${sourceName} ${input.questionNumber}번` : sourceName;
+}
+
+function emptyPromotionResult(message: string, status: "success" | "error" = "success"): PromotionResult {
+  return {
+    status,
+    message,
+    promotedCount: 0,
+    skippedCount: 0,
+    failedCount: status === "error" ? 1 : 0,
+  };
+}
+
+async function promoteCandidateRows(
+  rows: PromotionCandidateRow[],
+  batch: PromotionBatchRow,
+): Promise<PromotionResult> {
+  const { supabase, user } = await requireUser();
+  let promotedCount = 0;
+  let skippedCount = 0;
+  let failedCount = 0;
+  const failures: string[] = [];
+
+  for (const candidate of rows) {
+    if (candidate.review_status !== "approved") {
+      skippedCount += 1;
+      continue;
+    }
+
+    if (candidate.promoted_at || candidate.promoted_problem_id) {
+      skippedCount += 1;
+      continue;
+    }
+
+    const { data: existingProblem, error: existingProblemError } = await supabase
+      .from("problems")
+      .select("id")
+      .eq("source_candidate_id", candidate.id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (existingProblemError) {
+      failedCount += 1;
+      failures.push(`${candidate.candidate_id}: 중복 확인 실패`);
+      continue;
+    }
+
+    if (existingProblem) {
+      skippedCount += 1;
+      await supabase
+        .from("problem_candidates")
+        .update({
+          promoted_at: new Date().toISOString(),
+          promoted_problem_id: existingProblem.id,
+        })
+        .eq("id", candidate.id)
+        .eq("user_id", user.id);
+      continue;
+    }
+
+    const { data: problem, error: insertError } = await supabase
+      .from("problems")
+      .insert({
+        user_id: user.id,
+        source_candidate_id: candidate.id,
+        source_batch_id: candidate.batch_id,
+        title: problemTitle({
+          sourcePdfName: batch.source_pdf_name ?? candidate.source_pdf_name,
+          questionNumber: candidate.question_number_guess,
+        }),
+        source_pdf_name: batch.source_pdf_name ?? candidate.source_pdf_name,
+        question_number: candidate.question_number_guess,
+        image_storage_path: candidate.image_path,
+        bbox: candidate.bbox,
+        crop_version: candidate.crop_version ?? batch.crop_version,
+        review_grade: candidate.review_grade,
+      })
+      .select("id")
+      .single();
+
+    if (insertError || !problem) {
+      failedCount += 1;
+      failures.push(`${candidate.candidate_id}: ${errorMessage(insertError)}`);
+      continue;
+    }
+
+    const { error: updateCandidateError } = await supabase
+      .from("problem_candidates")
+      .update({
+        promoted_at: new Date().toISOString(),
+        promoted_problem_id: problem.id,
+      })
+      .eq("id", candidate.id)
+      .eq("user_id", user.id);
+
+    if (updateCandidateError) {
+      failedCount += 1;
+      failures.push(`${candidate.candidate_id}: 후보 승격 표시 실패`);
+      continue;
+    }
+
+    promotedCount += 1;
+  }
+
+  revalidatePath("/protected/problem-candidates");
+  revalidatePath("/protected/problems");
+
+  const message = [
+    `정식 문항 등록 완료: 성공 ${promotedCount}개, 건너뜀 ${skippedCount}개, 실패 ${failedCount}개`,
+    failures.length > 0 ? failures.slice(0, 3).join(" / ") : null,
+  ]
+    .filter(Boolean)
+    .join(" / ");
+
+  return {
+    status: failedCount > 0 ? "error" : "success",
+    message,
+    promotedCount,
+    skippedCount,
+    failedCount,
+  };
+}
+
+export async function promoteApprovedBatchCandidates(
+  batchId: string,
+): Promise<PromotionResult> {
+  const { supabase, user } = await requireUser();
+
+  const { data: batchData, error: batchError } = await supabase
+    .from("crop_import_batches")
+    .select("id,source_pdf_name,crop_version")
+    .eq("id", batchId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (batchError || !batchData) {
+    return emptyPromotionResult(`batch 조회 실패: ${errorMessage(batchError)}`, "error");
+  }
+
+  const { data: candidatesData, error: candidatesError } = await supabase
+    .from("problem_candidates")
+    .select("*")
+    .eq("batch_id", batchId)
+    .eq("user_id", user.id)
+    .eq("review_status", "approved")
+    .order("question_number_guess", { ascending: true, nullsFirst: false });
+
+  if (candidatesError) {
+    return emptyPromotionResult(`승인 후보 조회 실패: ${errorMessage(candidatesError)}`, "error");
+  }
+
+  const rows = (candidatesData ?? []) as PromotionCandidateRow[];
+  if (rows.length === 0) {
+    return emptyPromotionResult("승인 상태인 후보가 없습니다.");
+  }
+
+  return promoteCandidateRows(rows, batchData as PromotionBatchRow);
+}
+
+export async function promoteProblemCandidate(
+  candidateId: string,
+): Promise<PromotionResult> {
+  const { supabase, user } = await requireUser();
+
+  const { data: candidateData, error: candidateError } = await supabase
+    .from("problem_candidates")
+    .select("*")
+    .eq("id", candidateId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (candidateError || !candidateData) {
+    return emptyPromotionResult(`후보 조회 실패: ${errorMessage(candidateError)}`, "error");
+  }
+
+  const candidate = candidateData as PromotionCandidateRow;
+  if (candidate.review_status !== "approved") {
+    return emptyPromotionResult("approved 상태인 후보만 정식 문항으로 등록할 수 있습니다.", "error");
+  }
+
+  const { data: batchData, error: batchError } = await supabase
+    .from("crop_import_batches")
+    .select("id,source_pdf_name,crop_version")
+    .eq("id", candidate.batch_id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (batchError || !batchData) {
+    return emptyPromotionResult(`batch 조회 실패: ${errorMessage(batchError)}`, "error");
+  }
+
+  return promoteCandidateRows([candidate], batchData as PromotionBatchRow);
 }
 

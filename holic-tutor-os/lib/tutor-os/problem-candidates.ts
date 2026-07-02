@@ -57,6 +57,8 @@ export type ProblemCandidate = {
   rejected_reason: string | null;
   reviewed_at: string | null;
   approved_at: string | null;
+  promoted_at: string | null;
+  promoted_problem_id: string | null;
   created_at: string;
   updated_at: string;
 };

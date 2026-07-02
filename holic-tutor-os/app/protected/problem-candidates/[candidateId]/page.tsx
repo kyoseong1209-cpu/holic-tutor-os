@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, FileSearch, Save } from "lucide-react";
 
 import { updateProblemCandidateReview } from "@/app/protected/problem-candidates/actions";
+import { PromoteProblemCandidateButton } from "@/components/promote-problem-candidate-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -106,9 +107,18 @@ export default async function ProblemCandidateDetailPage({ params }: PageProps) 
                 <CardTitle>crop 이미지</CardTitle>
                 <CardDescription>{candidate.image_path}</CardDescription>
               </div>
-              <Badge className={statusBadgeClass(candidate.review_status)} variant="outline">
-                {reviewStatusLabel(candidate.review_status)}
-              </Badge>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className={statusBadgeClass(candidate.review_status)} variant="outline">
+                  {reviewStatusLabel(candidate.review_status)}
+                </Badge>
+                {candidate.promoted_problem_id ? (
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={`/protected/problems/${candidate.promoted_problem_id}`}>
+                      등록 문항 보기
+                    </Link>
+                  </Button>
+                ) : null}
+              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -210,6 +220,21 @@ export default async function ProblemCandidateDetailPage({ params }: PageProps) 
                   저장
                 </Button>
               </form>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg">
+            <CardHeader>
+              <CardTitle>정식 문항 등록</CardTitle>
+              <CardDescription>
+                approved 상태인 후보만 정식 문항 DB로 등록할 수 있습니다.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <PromoteProblemCandidateButton
+                candidateId={candidate.id}
+                disabled={candidate.review_status !== "approved" || Boolean(candidate.promoted_problem_id)}
+              />
             </CardContent>
           </Card>
 

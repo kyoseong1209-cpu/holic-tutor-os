@@ -36,6 +36,12 @@ export default function ProtectedLayout({
               >
                 문항 후보 검수함
               </Link>
+              <Link
+                className="text-muted-foreground hover:text-foreground"
+                href="/protected/problems"
+              >
+                문항 DB
+              </Link>
             </div>
             {!hasEnvVars ? (
               <EnvVarWarning />

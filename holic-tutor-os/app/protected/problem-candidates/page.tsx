@@ -8,6 +8,7 @@ import {
 
 import { updateProblemCandidateReview } from "@/app/protected/problem-candidates/actions";
 import { ProblemBatchDeleteButton } from "@/components/problem-batch-delete-button";
+import { PromoteApprovedBatchButton } from "@/components/promote-approved-batch-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -225,7 +226,10 @@ export default async function ProblemCandidatesPage({ searchParams }: PageProps)
                       {selectedBatch.missing_question_numbers.length}
                     </CardDescription>
                   </div>
-                  <Badge variant="outline">{selectedBatch.crop_version}</Badge>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="outline">{selectedBatch.crop_version}</Badge>
+                    <PromoteApprovedBatchButton batchId={selectedBatch.id} />
+                  </div>
                 </div>
               </CardHeader>
             </Card>
