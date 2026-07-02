@@ -4,13 +4,14 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
-import type { StudentStatus } from "@/lib/tutor-os/types";
+import type { LessonRecord, StudentStatus } from "@/lib/tutor-os/types";
 
 export type LessonRecordMutationState = {
   status: "idle" | "success" | "error";
   message: string;
   mutationId?: number;
   deletedLessonId?: string;
+  updatedLesson?: LessonRecord;
 };
 
 const DUPLICATE_LESSON_WINDOW_MS = 15_000;
@@ -160,6 +161,17 @@ function parentFeedbackDraft(input: {
   return lines.join("\n");
 }
 
+function storedLessonContent(content: string | null, internalMemo: string | null) {
+  return (
+    [
+      content ? `오늘 다룬 내용\n${content}` : null,
+      internalMemo ? `[선생님 내부 메모]\n${internalMemo}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n\n") || null
+  );
+}
+
 export async function createStudent(formData: FormData) {
   const { supabase, user } = await requireUser();
   const name = text(formData, "name");
@@ -282,21 +294,13 @@ export async function createLessonRecord(
     return mutationState("success", "수업 기록이 저장되었습니다");
   }
 
-  const storedContent =
-    [
-      coveredContent ? `오늘 다룬 내용\n${coveredContent}` : null,
-      internalMemo ? `[선생님 내부 메모]\n${internalMemo}` : null,
-    ]
-      .filter(Boolean)
-      .join("\n\n") || null;
-
   const { error } = await supabase.from("lesson_records").insert({
     user_id: user.id,
     student_id: studentId,
     lesson_date: lessonDate,
     duration_minutes: positiveInteger(formData, "duration_minutes"),
     topic,
-    content: storedContent,
+    content: storedLessonContent(coveredContent, internalMemo),
     performance: strengths,
     homework,
     next_plan: nextPlan,
@@ -322,6 +326,72 @@ export async function createLessonRecord(
   revalidatePath(`/protected/students/${studentId}`);
 
   return mutationState("success", "수업 기록이 저장되었습니다");
+}
+
+export async function updateLessonRecord(
+  studentId: string,
+  lessonId: string,
+  _previousState: LessonRecordMutationState,
+  formData: FormData,
+): Promise<LessonRecordMutationState> {
+  void _previousState;
+
+  const { supabase, user } = await requireUser();
+
+  const topic = text(formData, "topic");
+  const lessonDate = text(formData, "lesson_date") || new Date().toISOString().slice(0, 10);
+  const coveredContent = nullableText(formData, "content");
+  const strengths = nullableText(formData, "strengths") ?? nullableText(formData, "performance");
+  const parentNote = nullableText(formData, "parent_note");
+  const internalMemo = nullableText(formData, "internal_memo");
+  const homework = nullableText(formData, "homework");
+  const nextPlan = nullableText(formData, "next_plan");
+  const tags = weaknessTags(formData);
+
+  if (!topic) {
+    return mutationState("error", "수정에 실패했습니다. 다시 시도해주세요.");
+  }
+
+  const fallbackParentFeedback = parentFeedbackDraft({
+    topic,
+    content: coveredContent,
+    strengths,
+    parentNote: null,
+    homework,
+    nextPlan,
+    weaknessTags: tags,
+  });
+
+  const { data, error } = await supabase
+    .from("lesson_records")
+    .update({
+      lesson_date: lessonDate,
+      duration_minutes: positiveInteger(formData, "duration_minutes"),
+      topic,
+      content: storedLessonContent(coveredContent, internalMemo),
+      performance: strengths,
+      homework,
+      next_plan: nextPlan,
+      weakness_tags: tags,
+      parent_feedback_draft: parentNote ?? fallbackParentFeedback,
+    })
+    .eq("id", lessonId)
+    .eq("student_id", studentId)
+    .eq("user_id", user.id)
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    return mutationState("error", "수정에 실패했습니다. 다시 시도해주세요.");
+  }
+
+  revalidatePath("/protected");
+  revalidatePath("/protected/students");
+  revalidatePath(`/protected/students/${studentId}`);
+
+  return mutationState("success", "수업 기록이 수정되었습니다", {
+    updatedLesson: data as LessonRecord,
+  });
 }
 
 export async function deleteLessonRecord(
