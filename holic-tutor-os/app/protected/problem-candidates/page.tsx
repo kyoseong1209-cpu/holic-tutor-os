@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 
 import { updateProblemCandidateReview } from "@/app/protected/problem-candidates/actions";
+import { ProblemBatchDeleteButton } from "@/components/problem-batch-delete-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,7 +30,11 @@ import {
 } from "@/lib/tutor-os/problem-candidates";
 
 type PageProps = {
-  searchParams: Promise<{ batch?: string }>;
+  searchParams: Promise<{
+    batch?: string;
+    notice?: string;
+    noticeType?: "success" | "partial" | "error";
+  }>;
 };
 
 function statusBadgeClass(status: ReviewStatus) {
@@ -92,7 +97,11 @@ async function signedCandidates(
 }
 
 export default async function ProblemCandidatesPage({ searchParams }: PageProps) {
-  const { batch: selectedBatchParam } = await searchParams;
+  const {
+    batch: selectedBatchParam,
+    notice,
+    noticeType = "success",
+  } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -150,6 +159,21 @@ export default async function ProblemCandidatesPage({ searchParams }: PageProps)
         </Button>
       </section>
 
+      {notice ? (
+        <div
+          className={
+            noticeType === "error"
+              ? "rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+              : noticeType === "partial"
+                ? "rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100"
+                : "rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100"
+          }
+          role="status"
+        >
+          {notice}
+        </div>
+      ) : null}
+
       <section className="grid gap-4 lg:grid-cols-[280px_1fr]">
         <aside className="grid content-start gap-3">
           <Card className="rounded-lg">
@@ -161,22 +185,28 @@ export default async function ProblemCandidatesPage({ searchParams }: PageProps)
               {batches.length === 0 ? (
                 <p className="text-sm text-muted-foreground">아직 가져온 crop 결과가 없습니다.</p>
               ) : (
-                batches.map((batch) => (
-                  <Link
-                    className={
-                      batch.id === selectedBatch?.id
-                        ? "rounded-md border border-emerald-500 bg-emerald-50 p-3 text-sm dark:bg-emerald-950"
-                        : "rounded-md border p-3 text-sm transition hover:bg-muted"
-                    }
-                    href={`/protected/problem-candidates?batch=${batch.id}`}
-                    key={batch.id}
-                  >
-                    <p className="font-medium">{batch.source_pdf_name ?? "이름 없는 PDF"}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {batch.crop_version} · {batch.generated_crop_count ?? 0}개 후보
-                    </p>
-                  </Link>
-                ))
+                batches.map((batch) => {
+                  const batchName = batch.source_pdf_name ?? "이름 없는 PDF";
+
+                  return (
+                    <div
+                      className={
+                        batch.id === selectedBatch?.id
+                          ? "grid gap-3 rounded-md border border-emerald-500 bg-emerald-50 p-3 text-sm dark:bg-emerald-950"
+                          : "grid gap-3 rounded-md border p-3 text-sm transition hover:bg-muted"
+                      }
+                      key={batch.id}
+                    >
+                      <Link href={`/protected/problem-candidates?batch=${batch.id}`}>
+                        <p className="font-medium">{batchName}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {batch.crop_version} · {batch.generated_crop_count ?? 0}개 후보
+                        </p>
+                      </Link>
+                      <ProblemBatchDeleteButton batchId={batch.id} batchName={batchName} />
+                    </div>
+                  );
+                })
               )}
             </CardContent>
           </Card>

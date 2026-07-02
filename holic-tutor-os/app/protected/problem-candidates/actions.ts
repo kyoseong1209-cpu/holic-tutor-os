@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
 import {
+  PROBLEM_CANDIDATE_BUCKET,
   isReviewGrade,
   isReviewStatus,
   type ReviewGrade,
@@ -96,3 +97,142 @@ export async function updateProblemCandidateReview(
   revalidatePath("/protected/problem-candidates");
   revalidatePath(`/protected/problem-candidates/${candidateId}`);
 }
+
+export type BatchDeleteResult = {
+  status: "success" | "partial" | "error";
+  message: string;
+};
+
+type StoragePathRow = {
+  image_path: string | null;
+};
+
+type BatchStorageRow = {
+  id: string;
+  coordinates_path: string | null;
+  contact_sheet_path: string | null;
+  summary_path: string | null;
+};
+
+function errorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string") return message;
+  }
+
+  return "알 수 없는 오류가 발생했습니다.";
+}
+
+function uniqueStoragePaths(paths: Array<string | null | undefined>) {
+  return Array.from(
+    new Set(
+      paths
+        .map((path) => path?.trim())
+        .filter((path): path is string => Boolean(path)),
+    ),
+  );
+}
+
+export async function deleteProblemCandidateBatch(
+  batchId: string,
+): Promise<BatchDeleteResult> {
+  const { supabase, user } = await requireUser();
+
+  const { data: batchData, error: batchError } = await supabase
+    .from("crop_import_batches")
+    .select("id,coordinates_path,contact_sheet_path,summary_path")
+    .eq("id", batchId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (batchError || !batchData) {
+    return {
+      status: "error",
+      message: `DB batch 조회 실패: ${errorMessage(batchError)}`,
+    };
+  }
+
+  const batch = batchData as BatchStorageRow;
+  const { data: candidateRows, error: candidatesSelectError } = await supabase
+    .from("problem_candidates")
+    .select("image_path")
+    .eq("batch_id", batch.id)
+    .eq("user_id", user.id);
+
+  if (candidatesSelectError) {
+    return {
+      status: "error",
+      message: `DB 후보 조회 실패: ${errorMessage(candidatesSelectError)}`,
+    };
+  }
+
+  const imagePaths = ((candidateRows ?? []) as StoragePathRow[]).map(
+    (candidate) => candidate.image_path,
+  );
+  const storagePaths = uniqueStoragePaths([
+    batch.coordinates_path,
+    batch.contact_sheet_path,
+    batch.summary_path,
+    ...imagePaths,
+  ]);
+
+  let storageDeleteMessage: string | null = null;
+  if (storagePaths.length > 0) {
+    const { error } = await supabase.storage
+      .from(PROBLEM_CANDIDATE_BUCKET)
+      .remove(storagePaths);
+
+    if (error) {
+      storageDeleteMessage = `Storage 파일 삭제 실패: ${errorMessage(error)}`;
+    }
+  }
+
+  const { error: candidatesDeleteError } = await supabase
+    .from("problem_candidates")
+    .delete()
+    .eq("batch_id", batch.id)
+    .eq("user_id", user.id);
+
+  if (candidatesDeleteError) {
+    return {
+      status: "error",
+      message: `DB 후보 삭제 실패: ${errorMessage(candidatesDeleteError)}${
+        storageDeleteMessage ? ` / ${storageDeleteMessage}` : ""
+      }`,
+    };
+  }
+
+  const { error: batchDeleteError } = await supabase
+    .from("crop_import_batches")
+    .delete()
+    .eq("id", batch.id)
+    .eq("user_id", user.id);
+
+  if (batchDeleteError) {
+    return {
+      status: "error",
+      message: `DB batch 삭제 실패: ${errorMessage(batchDeleteError)}${
+        storageDeleteMessage ? ` / ${storageDeleteMessage}` : ""
+      }`,
+    };
+  }
+
+  revalidatePath("/protected/problem-candidates");
+
+  if (storageDeleteMessage) {
+    return {
+      status: "partial",
+      message: `DB에서는 가져오기 묶음을 삭제했습니다. ${storageDeleteMessage}`,
+    };
+  }
+
+  return {
+    status: "success",
+    message: "가져오기 묶음이 삭제되었습니다",
+  };
+}
+
