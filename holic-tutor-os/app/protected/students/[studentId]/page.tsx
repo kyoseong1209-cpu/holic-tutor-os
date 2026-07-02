@@ -3,7 +3,6 @@ import { notFound, redirect } from "next/navigation";
 import {
   ArrowLeft,
   MessageSquareText,
-  NotebookTabs,
   Plus,
   Save,
   Target,
@@ -14,6 +13,7 @@ import {
 
 import { deleteStudent, updateStudent } from "@/app/protected/actions";
 import { LessonRecordForm } from "@/components/lesson-record-form";
+import { LessonRecordsList } from "@/components/lesson-records-list";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -350,78 +350,7 @@ export default async function StudentDetailPage({
               </div>
             </CardContent>
           </Card>
-
-          <Card className="rounded-lg">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-xl">
-                <NotebookTabs className="size-5 text-emerald-700 dark:text-emerald-300" />
-                최근 수업 기록 5개
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {recentLessons.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  아직 수업 기록이 없습니다.
-                </p>
-              ) : (
-                <div className="divide-y">
-                  {recentLessons.map((lesson) => (
-                    <div className="grid gap-3 py-4 first:pt-0 last:pb-0" key={lesson.id}>
-                      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <p className="font-medium">{lesson.topic}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {lesson.lesson_date}
-                            {lesson.duration_minutes
-                              ? ` · ${lesson.duration_minutes}분`
-                              : ""}
-                          </p>
-                        </div>
-                        {lesson.weakness_tags.length > 0 ? (
-                          <div className="flex flex-wrap gap-1">
-                            {lesson.weakness_tags.map((tag) => (
-                              <span
-                                className="rounded-md bg-sky-100 px-2 py-1 text-xs text-sky-800 dark:bg-sky-950 dark:text-sky-200"
-                                key={tag}
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="grid gap-3 lg:grid-cols-3">
-                        <div className="rounded-md bg-muted p-3">
-                          <p className="text-xs font-medium text-muted-foreground">
-                            수업 요약
-                          </p>
-                          <p className="mt-2 line-clamp-3 whitespace-pre-line text-sm">
-                            {lessonSummary(lesson)}
-                          </p>
-                        </div>
-                        <div className="rounded-md bg-muted p-3">
-                          <p className="text-xs font-medium text-muted-foreground">
-                            숙제
-                          </p>
-                          <p className="mt-2 line-clamp-3 whitespace-pre-line text-sm">
-                            {optionalText(lesson.homework, "숙제 기록 없음")}
-                          </p>
-                        </div>
-                        <div className="rounded-md bg-muted p-3">
-                          <p className="text-xs font-medium text-muted-foreground">
-                            다음 우선순위
-                          </p>
-                          <p className="mt-2 line-clamp-3 whitespace-pre-line text-sm">
-                            {optionalText(lesson.next_plan, "다음 계획 기록 없음")}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <LessonRecordsList initialLessons={recentLessons} studentId={student.id} />
 
           <Card className="rounded-lg">
             <CardHeader>

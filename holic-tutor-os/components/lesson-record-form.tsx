@@ -1,11 +1,21 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { CheckCircle2, Copy } from "lucide-react";
 
-import { createLessonRecord } from "@/app/protected/actions";
+import {
+  createLessonRecord,
+  type LessonRecordMutationState,
+} from "@/app/protected/actions";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,6 +36,11 @@ const ERROR_TAGS = [
   "시간 관리 실패",
 ];
 
+const INITIAL_ACTION_STATE: LessonRecordMutationState = {
+  status: "idle",
+  message: "",
+};
+
 function splitTags(value: string) {
   return value
     .split(/[,\n]/)
@@ -44,6 +59,12 @@ export function LessonRecordForm({
   defaultDate: string;
   studentId: string;
 }) {
+  const router = useRouter();
+  const [actionState, formAction, isPending] = useActionState(
+    createLessonRecord.bind(null, studentId),
+    INITIAL_ACTION_STATE,
+  );
+  const handledMutationIdRef = useRef<number | null>(null);
   const [lessonDate, setLessonDate] = useState(defaultDate);
   const [topic, setTopic] = useState("");
   const [content, setContent] = useState("");
@@ -55,6 +76,7 @@ export function LessonRecordForm({
   const [parentNote, setParentNote] = useState("");
   const [internalMemo, setInternalMemo] = useState("");
   const [copied, setCopied] = useState(false);
+  const [submitLocked, setSubmitLocked] = useState(false);
 
   const combinedTags = useMemo(
     () => uniqueTags([...splitTags(weaknessText), ...selectedTags]),
@@ -92,10 +114,45 @@ export function LessonRecordForm({
     return lines.join("\n");
   }, [combinedTags, content, homework, nextPlan, parentNote, strengths, topic]);
 
+  const isSubmitDisabled = isPending || submitLocked;
+
+  useEffect(() => {
+    if (!actionState.mutationId) return;
+    if (handledMutationIdRef.current === actionState.mutationId) return;
+
+    handledMutationIdRef.current = actionState.mutationId;
+    setSubmitLocked(false);
+
+    if (actionState.status === "success") {
+      setLessonDate(defaultDate);
+      setTopic("");
+      setContent("");
+      setStrengths("");
+      setWeaknessText("");
+      setSelectedTags([]);
+      setHomework("");
+      setNextPlan("");
+      setParentNote("");
+      setInternalMemo("");
+      router.refresh();
+    }
+  }, [actionState, defaultDate, router]);
+
   function toggleTag(tag: string) {
+    if (isPending) return;
+
     setSelectedTags((current) =>
       current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag],
     );
+  }
+
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    if (isSubmitDisabled) {
+      event.preventDefault();
+      return;
+    }
+
+    setSubmitLocked(true);
   }
 
   async function copyDraft() {
@@ -113,13 +170,28 @@ export function LessonRecordForm({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form action={createLessonRecord.bind(null, studentId)} className="grid gap-6">
+        <form action={formAction} className="grid gap-6" onSubmit={handleSubmit}>
           <input name="weakness_tags" type="hidden" value={combinedTags.join(", ")} />
+
+          {actionState.status !== "idle" ? (
+            <div
+              className={cn(
+                "rounded-md border px-4 py-3 text-sm",
+                actionState.status === "success"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100"
+                  : "border-destructive/30 bg-destructive/10 text-destructive",
+              )}
+              role={actionState.status === "error" ? "alert" : "status"}
+            >
+              {actionState.message}
+            </div>
+          ) : null}
 
           <div className="grid gap-4 md:grid-cols-[180px_1fr]">
             <div className="space-y-2">
               <Label htmlFor="lesson_date">수업 날짜</Label>
               <Input
+                disabled={isPending}
                 id="lesson_date"
                 name="lesson_date"
                 onChange={(event) => setLessonDate(event.target.value)}
@@ -131,6 +203,7 @@ export function LessonRecordForm({
             <div className="space-y-2">
               <Label htmlFor="topic">수업 단원</Label>
               <Input
+                disabled={isPending}
                 id="topic"
                 name="topic"
                 onChange={(event) => setTopic(event.target.value)}
@@ -146,6 +219,7 @@ export function LessonRecordForm({
               <Label htmlFor="content">오늘 다룬 내용</Label>
               <Textarea
                 className="min-h-28"
+                disabled={isPending}
                 id="content"
                 name="content"
                 onChange={(event) => setContent(event.target.value)}
@@ -157,6 +231,7 @@ export function LessonRecordForm({
               <Label htmlFor="strengths">학생이 잘한 점</Label>
               <Textarea
                 className="min-h-28"
+                disabled={isPending}
                 id="strengths"
                 name="strengths"
                 onChange={(event) => setStrengths(event.target.value)}
@@ -171,6 +246,7 @@ export function LessonRecordForm({
               <Label htmlFor="weakness_text">반복 약점</Label>
               <Textarea
                 className="min-h-24"
+                disabled={isPending}
                 id="weakness_text"
                 onChange={(event) => setWeaknessText(event.target.value)}
                 placeholder="직접 적거나 아래 태그를 눌러 추가하세요. 쉼표 또는 줄바꿈으로 여러 개 입력할 수 있습니다."
@@ -186,11 +262,12 @@ export function LessonRecordForm({
                     <button
                       aria-pressed={selected}
                       className={cn(
-                        "min-h-9 rounded-md border px-3 py-1.5 text-sm font-medium transition",
+                        "min-h-9 rounded-md border px-3 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60",
                         selected
                           ? "border-foreground bg-foreground text-background"
                           : "border-border bg-background text-foreground hover:bg-muted",
                       )}
+                      disabled={isPending}
                       key={tag}
                       onClick={() => toggleTag(tag)}
                       type="button"
@@ -211,6 +288,7 @@ export function LessonRecordForm({
               <Label htmlFor="homework">숙제</Label>
               <Textarea
                 className="min-h-24"
+                disabled={isPending}
                 id="homework"
                 name="homework"
                 onChange={(event) => setHomework(event.target.value)}
@@ -222,6 +300,7 @@ export function LessonRecordForm({
               <Label htmlFor="next_plan">다음 수업 우선순위</Label>
               <Textarea
                 className="min-h-24"
+                disabled={isPending}
                 id="next_plan"
                 name="next_plan"
                 onChange={(event) => setNextPlan(event.target.value)}
@@ -236,6 +315,7 @@ export function LessonRecordForm({
               <Label htmlFor="parent_note">학부모 전달 메모</Label>
               <Textarea
                 className="min-h-28"
+                disabled={isPending}
                 id="parent_note"
                 name="parent_note"
                 onChange={(event) => setParentNote(event.target.value)}
@@ -247,6 +327,7 @@ export function LessonRecordForm({
               <Label htmlFor="internal_memo">선생님 내부 메모</Label>
               <Textarea
                 className="min-h-28"
+                disabled={isPending}
                 id="internal_memo"
                 name="internal_memo"
                 onChange={(event) => setInternalMemo(event.target.value)}
@@ -274,8 +355,8 @@ export function LessonRecordForm({
           </div>
 
           <div className="flex justify-end">
-            <Button className="w-full sm:w-auto" size="lg" type="submit">
-              수업 기록 저장
+            <Button className="w-full sm:w-auto" disabled={isSubmitDisabled} size="lg" type="submit">
+              {isSubmitDisabled ? "저장 중..." : "수업 기록 저장"}
             </Button>
           </div>
         </form>
